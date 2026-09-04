@@ -219,17 +219,33 @@ func (e *Engine) serviceFor(repo string, server configsync.Tree) services.Servic
 func (e *Engine) serverPaths(server configsync.Tree) []string {
 	var out []string
 
-	add := func(v any) {
+	// An empty value must be rejected before anything is appended to it: a
+	// suffix would turn "" into a rooted path and grant the service "/".
+	usable := func(v any) (string, bool) {
 		s, ok := v.(string)
 		if !ok || s == "" {
-			return
+			return "", false
 		}
 
 		if strings.HasPrefix(s, "~/") {
 			s = filepath.Join(e.L.Home, s[2:])
 		}
 
-		if !strings.HasPrefix(s, e.L.StateDir+string(filepath.Separator)) {
+		if strings.HasPrefix(s, e.L.StateDir+string(filepath.Separator)) {
+			return "", false
+		}
+
+		return s, true
+	}
+
+	addDir := func(v any) {
+		if s, ok := usable(v); ok {
+			out = append(out, s)
+		}
+	}
+
+	addFile := func(v any) {
+		if s, ok := usable(v); ok {
 			out = append(out, filepath.Dir(s))
 		}
 	}
@@ -241,21 +257,19 @@ func (e *Engine) serverPaths(server configsync.Tree) []string {
 				continue
 			}
 
-			if dir, ok := entry["dir"].(string); ok {
-				add(dir + "/x")
-			}
+			addDir(entry["dir"])
 		}
 	} else if v, ok := configsync.Get(server, "boards.dir"); ok {
-		add(fmt.Sprint(v) + "/x")
+		addDir(v)
 	}
 
 	if v, ok := configsync.Get(server, "task_skills.dir"); ok {
-		add(fmt.Sprint(v) + "/x")
+		addDir(v)
 	}
 
 	for _, key := range []string{"auth.db_path", "auth.master_key_file", "images.db_path", "op_store.db_path"} {
 		if v, ok := configsync.Get(server, key); ok {
-			add(v)
+			addFile(v)
 		}
 	}
 
