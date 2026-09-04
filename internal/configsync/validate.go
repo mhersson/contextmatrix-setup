@@ -3,6 +3,7 @@ package configsync
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -76,9 +77,24 @@ func CrossCheck(server, agent, chat Tree) []string {
 }
 
 func portOf(v any) string {
-	u, err := url.Parse(fmt.Sprint(v))
+	s := fmt.Sprint(v)
+
+	u, err := url.Parse(s)
 	if err != nil {
 		return ""
+	}
+
+	if u.Host == "" {
+		// A scheme-less "host:port" value parses with the part before the
+		// colon read as the scheme and an empty Host, so recover the port
+		// directly instead of falling through to the URL default below.
+		if _, port, splitErr := net.SplitHostPort(s); splitErr == nil && port != "" {
+			return port
+		}
+
+		if u.Scheme == "" {
+			return ""
+		}
 	}
 
 	if p := u.Port(); p != "" {

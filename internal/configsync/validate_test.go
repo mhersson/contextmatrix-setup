@@ -45,3 +45,11 @@ backends:
 	assert.Contains(t, warnings[0], "agent.yaml api_key")
 	assert.Contains(t, warnings[0], "server.yaml backends.agent.api_key")
 }
+
+func TestPortOf(t *testing.T) {
+	assert.Equal(t, "19092", portOf("http://localhost:19092"))
+	assert.Equal(t, "443", portOf("https://x"))
+	assert.Equal(t, "80", portOf("http://x"))
+	assert.Equal(t, "19092", portOf("localhost:19092"), "scheme-less host:port")
+	assert.Empty(t, portOf("garbage"))
+}
