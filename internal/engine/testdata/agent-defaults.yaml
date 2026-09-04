@@ -1,0 +1,11 @@
+contextmatrix_url: ""
+container_contextmatrix_url: ""
+api_key: ""
+mcp_api_key: ""
+port: 9092
+base_image: ""
+image_pull_policy: if-not-present
+secrets_dir: /var/run/cm-agent/secrets
+log_dir: ""
+default_model: ""
+worker_extra_env: {}

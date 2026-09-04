@@ -1,0 +1,11 @@
+contextmatrix_url: ""
+container_contextmatrix_url: ""
+api_key: ""
+port: 9093
+base_image: ""
+image_pull_policy: if-not-present
+secrets_dir: /var/run/cm-chat/secrets
+chat_run_dir: ""
+compaction:
+  threshold: 0.85
+  keep_recent_turns: 6

@@ -1,0 +1,51 @@
+port: 8080
+instance:
+  id: ""
+log_level: info
+workflow_skills_dir: ""
+mcp_api_key: ""
+llm_endpoint:
+  type: ""
+  base_url: ""
+  api_key: ""
+token_costs: {}
+boards:
+  name: boards
+  dir: ""
+  git_auto_commit: true
+  git_auto_push: false
+  git_clone_on_empty: false
+  git_remote_url: ""
+task_skills:
+  dir: ""
+  git_clone_on_empty: false
+  git_remote_url: ""
+backends:
+  agent:
+    url: ""
+    api_key: ""
+    enabled: false
+    default_model: ""
+    aa_api_key: ""
+    model_allowlist: []
+  chat:
+    url: ""
+    api_key: ""
+    enabled: false
+    default_model: ""
+auth:
+  mode: multi
+  master_key_file: ""
+  db_path: ""
+images:
+  db_path: ""
+op_store:
+  db_path: ""
+github:
+  auth_mode: ""
+  app:
+    app_id: 0
+    installation_id: 0
+    private_key_path: ""
+  pat:
+    token: ""
