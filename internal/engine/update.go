@@ -114,6 +114,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}}
 	oldTags := map[string]string{}
 	imageChanged := map[string]bool{}
+	buildFailed := map[string]bool{}
 
 	if e.Host.Docker {
 		for _, repo := range []string{repos.Agent, repos.Chat} {
@@ -127,6 +128,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			tag, id, err := e.Images.Build(ctx, e.L.SrcDir(repo), repo, heads[repo], e.Out)
 			if err != nil {
 				e.logf("%-22s image build failed, keeping %s: %v", repo, oldTags[repo], err)
+
+				buildFailed[repo] = true
 
 				continue
 			}
@@ -145,13 +148,19 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	trees := Opinionated(answers, facts)
 	results := map[string]configResult{}
 	configChanged := map[string]bool{}
+	handEdited := map[string]bool{}
 
 	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat} {
 		name := filepath.Base(e.L.ConfigFor(repo))
 
 		if prev, ok := st.Configs[name]; ok {
+			// A hand edit that survives the merge re-encodes to the bytes
+			// already on disk, so only this hash reveals that the running
+			// service is out of date with its file.
 			if data, err := os.ReadFile(e.L.ConfigFor(repo)); err == nil && configsync.Hash(data) != prev.SHA256 {
 				e.logf("%-22s edited by hand since the last run; values kept", name)
+
+				handEdited[repo] = true
 			}
 		}
 
@@ -214,7 +223,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	anything := false
 
 	for _, repo := range repos.Apps {
-		needs := moved[repo] || configChanged[repo] || imageChanged[repo] || unitChanged[repo]
+		needs := moved[repo] || configChanged[repo] || handEdited[repo] || imageChanged[repo] || unitChanged[repo]
 		if !needs {
 			continue
 		}
@@ -222,6 +231,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		anything = true
 
 		switch {
+		case buildFailed[repo]:
+			e.logf("%-22s not restarted: image build failed", repo)
 		case !valid[repo]:
 			e.logf("%-22s not restarted: config invalid", repo)
 		case repo == repos.Server && !github:
@@ -254,6 +265,12 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	st.ServiceManager = e.Services.Kind()
 
 	for _, repo := range repos.Apps {
+		// A repo whose image did not build stays on its recorded commit, so
+		// the next run sees it as moved again and retries the build.
+		if buildFailed[repo] {
+			continue
+		}
+
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}
 	}
 

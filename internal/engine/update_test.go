@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
@@ -108,6 +109,42 @@ func TestUpdateKeepsManualEditsAndDropsStaleKeys(t *testing.T) {
 	assert.Contains(t, h.out.String(), "dropped obsolete")
 	assert.Contains(t, h.out.String(), "edited by hand")
 	assert.Equal(t, []string{"contextmatrix"}, restarts(h), "config changed, server restarted")
+}
+
+func TestUpdateFailedImageBuildSkipsRestart(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.images.fail = true
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Empty(t, restarts(h))
+	assert.Contains(t, h.out.String(), "image build failed")
+
+	st, _, _ := state.Load(h.e.L.StateFile())
+	assert.Equal(t, "bbbbbbb2222", st.Repos["contextmatrix-agent"].Commit, "the repo stays unrecorded so the next run retries")
+	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", st.Images["contextmatrix-agent-worker"].Tag)
+
+	agent, _, _ := configsync.LoadFile(h.e.L.AgentConfig())
+	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", get(t, agent, "base_image"))
+}
+
+func TestUpdateHandEditAloneRestartsService(t *testing.T) {
+	h := installed(t, true)
+
+	// Re-encoded with the engine's own reference line, so the merge produces
+	// byte-identical output and only the state hash reveals the edit.
+	server, _, _ := configsync.LoadFile(h.e.L.ServerConfig())
+	configsync.Set(server, "log_level", "debug")
+	data, err := configsync.Encode(server, referenceFor(repos.Server))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(h.e.L.ServerConfig(), data, 0o600))
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{"contextmatrix"}, restarts(h))
+	assert.Contains(t, h.out.String(), "edited by hand")
+	assert.NotContains(t, h.out.String(), "up to date")
 }
 
 func TestUpdateWorkflowSkillsOnlyWhenChanged(t *testing.T) {
