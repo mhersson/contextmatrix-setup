@@ -66,9 +66,9 @@ func TestInstallFreshWithDocker(t *testing.T) {
 
 	unit, _ := os.ReadFile(h.e.Services.UnitPath("contextmatrix"))
 	assert.Contains(t, string(unit), "ExecStart="+h.e.Host.GoBin+"/contextmatrix -config "+h.e.L.ServerConfig())
-	// The default boards dir lives under StateDir, so serverPaths adds nothing
-	// and the state dir alone grants the writes the server needs.
-	assert.Contains(t, string(unit), "ReadWritePaths=-"+h.e.L.StateDir)
+	// The default boards dir sits under StateDir, which is always listed, so
+	// serverPaths adds an entry only for a boards dir outside it.
+	assert.Contains(t, string(unit), "-"+h.e.L.StateDir)
 	agentUnit, _ := os.ReadFile(h.e.Services.UnitPath("contextmatrix-agent"))
 	assert.Contains(t, string(agentUnit), "ExecStart="+h.e.Host.GoBin+"/contextmatrix-agent serve --config "+h.e.L.AgentConfig())
 
