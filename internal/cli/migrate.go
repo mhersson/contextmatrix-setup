@@ -43,7 +43,18 @@ func newMigrateCmd() *cobra.Command {
 				return err
 			}
 
-			return newInstallCmd().ExecuteContext(cmd.Context())
+			return chainedInstall().ExecuteContext(cmd.Context())
 		},
 	}
+}
+
+// chainedInstall prepares the install command for a run inside another
+// command. Without an explicit empty argument list cobra falls back to
+// os.Args[1:], which still says "migrate", and install rejects it.
+func chainedInstall() *cobra.Command {
+	sub := newInstallCmd()
+	sub.SetArgs([]string{})
+	sub.SilenceUsage, sub.SilenceErrors = true, true
+
+	return sub
 }

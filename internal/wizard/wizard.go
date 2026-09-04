@@ -20,6 +20,10 @@ keeps every file under ~/.contextmatrix and one config directory, and exposes
 only the settings a local setup needs. Everything else keeps the upstream
 default; edit the config files by hand for the rest.`
 
+// patPageURL is GitHub's new-token page with the scopes prefilled. The PAT
+// step both opens it and prints it, so the two can never drift apart.
+const patPageURL = "https://github.com/settings/tokens/new?scopes=repo&description=ContextMatrix"
+
 func AskMigrate(found migrate.Found) (bool, error) {
 	yes := true
 
@@ -56,7 +60,9 @@ func AskMoveRepos(dirs []migrate.RepoDir) (map[string]bool, error) {
 	return out, nil
 }
 
-func Run(in engine.Answers, info host.Info) (engine.Answers, error) {
+// Run asks for every answer, prefilled with in. open receives the GitHub
+// new-token page when the PAT mode is chosen; a nil open just skips that.
+func Run(in engine.Answers, info host.Info, open func(url string) error) (engine.Answers, error) {
 	a := in
 	serverPort, agentPort, chatPort := strconv.Itoa(a.ServerPort), strconv.Itoa(a.AgentPort), strconv.Itoa(a.ChatPort)
 	appID, installID := strconv.FormatInt(a.GitHubAppID, 10), strconv.FormatInt(a.GitHubInstallID, 10)
@@ -75,7 +81,7 @@ func Run(in engine.Answers, info host.Info) (engine.Answers, error) {
 		return nil
 	}
 
-	form := huh.NewForm(
+	first := huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().Title("ContextMatrix setup").Description(welcome+"\n\n"+prereqs),
 		),
@@ -107,15 +113,41 @@ func Run(in engine.Answers, info host.Info) (engine.Answers, error) {
 				Options(huh.NewOption("pat", "pat"), huh.NewOption("app", "app"), huh.NewOption("skip", "skip")).
 				Value(&a.GitHubMode),
 		),
-		huh.NewGroup(
-			huh.NewNote().Title("Personal access token").Description("Create one at https://github.com/settings/tokens/new?scopes=repo&description=ContextMatrix"),
+	)
+
+	if err := first.Run(); err != nil {
+		return a, err
+	}
+
+	// The GitHub credentials asked for depend on the mode just chosen, so they
+	// run as their own form rather than as hidden groups of the first one.
+	switch a.GitHubMode {
+	case "pat":
+		if open != nil {
+			// The note prints the URL as well, so a browser that will not
+			// open is nothing to report.
+			_ = open(patPageURL)
+		}
+
+		pat := huh.NewForm(huh.NewGroup(
+			huh.NewNote().Title("Personal access token").Description("Create one at "+patPageURL),
 			huh.NewInput().Title("Token").EchoMode(huh.EchoModePassword).Value(&a.GitHubPAT),
-		).WithHideFunc(func() bool { return a.GitHubMode != "pat" }),
-		huh.NewGroup(
+		))
+		if err := pat.Run(); err != nil {
+			return a, err
+		}
+	case "app":
+		app := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("App id").Value(&appID),
 			huh.NewInput().Title("Installation id").Value(&installID),
 			huh.NewInput().Title("Private key file").Description("Copied to ~/.contextmatrix/server/github-app.pem").Value(&a.GitHubKeyFile),
-		).WithHideFunc(func() bool { return a.GitHubMode != "app" }),
+		))
+		if err := app.Run(); err != nil {
+			return a, err
+		}
+	}
+
+	rest := huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().Title("Artificial Analysis").Description("Optional. Enables live model quality scores for the selector. Free tier at https://artificialanalysis.ai"),
 			huh.NewInput().Title("Artificial Analysis API key").EchoMode(huh.EchoModePassword).Value(&a.AAKey),
@@ -136,7 +168,7 @@ func Run(in engine.Answers, info host.Info) (engine.Answers, error) {
 		),
 	)
 
-	if err := form.Run(); err != nil {
+	if err := rest.Run(); err != nil {
 		return a, err
 	}
 

@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
+	"github.com/mhersson/contextmatrix-setup/internal/host"
 	"github.com/mhersson/contextmatrix-setup/internal/migrate"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 	"github.com/mhersson/contextmatrix-setup/internal/wizard"
@@ -60,6 +63,35 @@ func (v invertBool) Set(s string) error {
 func (invertBool) Type() string { return "bool" }
 
 func (invertBool) IsBoolFlag() bool { return true }
+
+// overlayChangedFlags copies the answers whose flags were actually given on
+// the command line over values carried in from a migrated install. Without it
+// a non-interactive install accepts every flag and then throws it away.
+func overlayChangedFlags(fs *pflag.FlagSet, dst *engine.Answers, src engine.Answers) {
+	copyIf := func(name string, apply func()) {
+		if fs.Changed(name) {
+			apply()
+		}
+	}
+
+	copyIf("auth-mode", func() { dst.AuthMode = src.AuthMode })
+	copyIf("server-port", func() { dst.ServerPort = src.ServerPort })
+	copyIf("agent-port", func() { dst.AgentPort = src.AgentPort })
+	copyIf("chat-port", func() { dst.ChatPort = src.ChatPort })
+	copyIf("openrouter-key", func() { dst.OpenRouterKey = src.OpenRouterKey })
+	copyIf("default-model", func() { dst.DefaultModel = src.DefaultModel })
+	copyIf("github-mode", func() { dst.GitHubMode = src.GitHubMode })
+	copyIf("github-pat", func() { dst.GitHubPAT = src.GitHubPAT })
+	copyIf("github-app-id", func() { dst.GitHubAppID = src.GitHubAppID })
+	copyIf("github-installation-id", func() { dst.GitHubInstallID = src.GitHubInstallID })
+	copyIf("github-key-file", func() { dst.GitHubKeyFile = src.GitHubKeyFile })
+	copyIf("aa-key", func() { dst.AAKey = src.AAKey })
+	copyIf("task-skills-url", func() { dst.TaskSkillsURL = src.TaskSkillsURL })
+	copyIf("boards-url", func() { dst.BoardsURL = src.BoardsURL })
+	copyIf("boards-name", func() { dst.BoardsName = src.BoardsName })
+	copyIf("no-services", func() { dst.Services = src.Services })
+	copyIf("linger", func() { dst.Linger = src.Linger })
+}
 
 func newInstallCmd() *cobra.Command {
 	a := engine.DefaultAnswers()
@@ -129,14 +161,15 @@ func newInstallCmd() *cobra.Command {
 					}
 
 					prefill := engine.AnswersFrom(engine.Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
-					prefill.Services = a.Services
-					prefill.Linger = a.Linger
+					overlayChangedFlags(cmd.Flags(), &prefill, a)
+					prefill.Services, prefill.Linger = a.Services, a.Linger
 					a = prefill
 				}
 			}
 
 			if !yes {
-				if a, err = wizard.Run(a, e.Host); err != nil {
+				open := func(u string) error { return host.OpenBrowser(ctx, e.R, runtime.GOOS, u) }
+				if a, err = wizard.Run(a, e.Host, open); err != nil {
 					return err
 				}
 			}
