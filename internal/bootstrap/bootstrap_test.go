@@ -57,3 +57,22 @@ func TestWaitFollowEndsEarly(t *testing.T) {
 	_, err := Wait(context.Background(), follow, time.Second)
 	require.ErrorIs(t, err, ErrNoLink)
 }
+
+func TestWaitStopsAChattyFollower(t *testing.T) {
+	// follow never checks ctx itself; it keeps writing until a write fails.
+	// This is deliberate: it must attempt a write after the link is found,
+	// with no chance to observe cancellation before that write blocks.
+	follow := func(_ context.Context, w io.Writer) error {
+		_, _ = io.WriteString(w, `msg="auth: bootstrap link" path=/auth/token/chatty`+"\n")
+
+		for {
+			if _, err := io.WriteString(w, "still logging\n"); err != nil {
+				return nil
+			}
+		}
+	}
+
+	p, err := Wait(context.Background(), follow, 2*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, "/auth/token/chatty", p)
+}

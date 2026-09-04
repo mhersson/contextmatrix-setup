@@ -62,6 +62,11 @@ func Wait(ctx context.Context, follow func(ctx context.Context, w io.Writer) err
 	select {
 	case p, ok := <-found:
 		cancel()
+
+		// A follower blocked in Write does not observe context cancellation;
+		// closing the read end unblocks it with io.ErrClosedPipe so it can return.
+		_ = pr.Close()
+
 		<-done
 
 		if !ok {
