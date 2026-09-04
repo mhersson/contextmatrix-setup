@@ -66,6 +66,15 @@ func (e *Engine) path() string {
 	return os.Getenv("PATH")
 }
 
+// useRecordedManager swaps in the inert manager when the state says "none":
+// the user declined service management at install, so no unit is written,
+// started or removed on a later run either.
+func (e *Engine) useRecordedManager(kind string) {
+	if kind == "none" {
+		e.Services = services.New("none", e.R, e.L, 0)
+	}
+}
+
 func (e *Engine) logf(format string, args ...any) {
 	fmt.Fprintf(e.Out, format+"\n", args...)
 }

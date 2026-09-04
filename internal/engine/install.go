@@ -120,8 +120,14 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	e.announce(ctx, a, valid[repos.Server] && a.Services && github)
 
 	st.OS = e.Host.OS
-	st.ServiceManager = e.Services.Kind()
 	st.Docker = e.Host.Docker
+
+	// The host may well have a service manager; what is recorded is whether
+	// this installation uses one, so later runs stay off it.
+	st.ServiceManager = "none"
+	if a.Services {
+		st.ServiceManager = e.Services.Kind()
+	}
 
 	for _, repo := range repos.Apps {
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}

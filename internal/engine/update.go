@@ -29,6 +29,9 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		return errors.New("nothing installed yet: run contextmatrix-setup install first")
 	}
 
+	e.useRecordedManager(st.ServiceManager)
+	unmanaged := e.Services.Kind() == "none"
+
 	heads, err := e.syncRepos(ctx, repos.Apps)
 	if err != nil {
 		return err
@@ -185,7 +188,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	unitChanged := map[string]bool{}
 
-	if e.Services.Kind() != "none" {
+	if !unmanaged {
 		for _, repo := range repos.Apps {
 			changed, err := e.Services.Install(ctx, e.serviceFor(repo, results[repos.Server].Tree))
 			if err != nil {
@@ -216,6 +219,10 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			e.logf("%-22s not started: github block missing in server.yaml", repo)
 		case repo != repos.Server && !e.Host.Docker:
 			e.logf("%-22s not started: docker not available", repo)
+		case unmanaged:
+			// Nothing to restart, and the old image stays until the user
+			// restarts the process by hand.
+			continue
 		default:
 			if err := e.Services.Restart(ctx, repo); err != nil {
 				e.logf("%-22s restart failed: %v", repo, err)
@@ -232,6 +239,10 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 				}
 			}
 		}
+	}
+
+	if anything && unmanaged {
+		e.printStartCommands()
 	}
 
 	if !anything && len(moved) == 0 {

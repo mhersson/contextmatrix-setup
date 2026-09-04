@@ -36,6 +36,8 @@ func (e *Engine) Status(ctx context.Context) (Status, error) {
 		return Status{}, err
 	}
 
+	e.useRecordedManager(st.ServiceManager)
+
 	s := Status{Ports: map[string]int{}, Images: map[string]string{}, Docker: e.Host.Docker, Manager: e.Services.Kind()}
 
 	for _, repo := range repos.Apps {
@@ -87,6 +89,20 @@ func (e *Engine) PrintStatus(s Status) {
 }
 
 func (e *Engine) Uninstall(ctx context.Context) error {
+	st, _, err := state.Load(e.L.StateFile())
+	if err != nil {
+		return err
+	}
+
+	e.useRecordedManager(st.ServiceManager)
+
+	if e.Services.Kind() == "none" {
+		e.logf("no services were installed; nothing to remove")
+		e.logf("kept: %s, %s, binaries in %s", e.L.ConfigDir, e.L.StateDir, e.Host.GoBin)
+
+		return nil
+	}
+
 	for _, repo := range repos.Apps {
 		if err := e.Services.Remove(ctx, repo); err != nil {
 			return fmt.Errorf("remove %s service: %w", repo, err)

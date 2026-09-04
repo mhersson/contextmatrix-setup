@@ -199,3 +199,22 @@ func TestInstallFailsWhenBuildFails(t *testing.T) {
 	_, err = os.Stat(h.e.L.ServerConfig())
 	assert.True(t, os.IsNotExist(err), "no config written after a failed build")
 }
+
+func TestInstallWithoutServicesRecordsNone(t *testing.T) {
+	h := newHarness(t, true)
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+	a.Services = false
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	assert.Empty(t, systemctlCalls(h), "no unit is written, enabled or started")
+
+	st, found, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "none", st.ServiceManager)
+	assert.Contains(t, h.out.String(), "start by hand")
+}

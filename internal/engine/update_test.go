@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,36 @@ func installed(t *testing.T, docker bool) *harness {
 	h.images.built = nil
 
 	return h
+}
+
+// declined installs with service management turned down, the way a user who
+// answers no to the services question ends up.
+func declined(t *testing.T) *harness {
+	t.Helper()
+
+	h := newHarness(t, true)
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+	a.Services = false
+	require.NoError(t, h.e.Install(context.Background(), a))
+	h.out.b = nil
+	h.images.built = nil
+
+	return h
+}
+
+func systemctlCalls(h *harness) []string {
+	var out []string
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == "systemctl" {
+			out = append(out, strings.Join(c.Args, " "))
+		}
+	}
+
+	return out
 }
 
 func restarts(h *harness) []string {
@@ -213,4 +244,45 @@ func TestStatusAndUninstall(t *testing.T) {
 
 	_, err = os.Stat(h.e.L.ServerConfig())
 	assert.NoError(t, err, "configs survive uninstall")
+}
+
+func TestUpdateAfterDeclinedServicesSkipsUnits(t *testing.T) {
+	h := declined(t)
+	before := len(h.runner.Calls())
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Empty(t, systemctlCalls(h), "no unit is written and nothing is restarted")
+
+	rebuilt := false
+
+	for _, c := range h.runner.Calls()[before:] {
+		if c.Name == "make" && c.Dir == h.e.L.SrcDir("contextmatrix-agent") && c.Args[0] == "install" {
+			rebuilt = true
+		}
+	}
+
+	assert.True(t, rebuilt, "the moved repo is still rebuilt")
+	assert.Contains(t, h.out.String(), "start by hand")
+
+	st, _, _ := state.Load(h.e.L.StateFile())
+	assert.Equal(t, "none", st.ServiceManager)
+	assert.Equal(t, "b9999999999", st.Repos["contextmatrix-agent"].Commit)
+}
+
+func TestStatusAndUninstallWithoutServices(t *testing.T) {
+	h := declined(t)
+
+	s, err := h.e.Status(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "none", s.Manager)
+
+	h.e.PrintStatus(s)
+	assert.Contains(t, h.out.String(), "unmanaged")
+
+	require.NoError(t, h.e.Uninstall(context.Background()))
+	assert.NotContains(t, h.out.String(), "service removed")
+	assert.Contains(t, h.out.String(), "kept:")
+	assert.Empty(t, systemctlCalls(h))
 }
