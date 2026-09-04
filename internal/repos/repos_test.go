@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,12 +24,29 @@ func origin(t *testing.T) (string, func(name, content string) string) {
 	bare := filepath.Join(root, "origin.git")
 	work := filepath.Join(root, "work")
 
+	// The host's global/system config and any GIT_* variable (GIT_DIR,
+	// forced commit.gpgsign, a global hooksPath, ...) must never reach this
+	// fixture, so the environment is rebuilt from scratch for every call.
+	env := []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}
+
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "GIT_") {
+			env = append(env, e)
+		}
+	}
+
 	git := func(dir string, args ...string) string {
 		t.Helper()
 
 		// git is fixed and the test drives its own args in a temp dir.
-		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"}, args...)...) //nolint:gosec
+		cmd := exec.Command("git", append([]string{ //nolint:gosec
+			"-c", "user.name=t",
+			"-c", "user.email=t@t",
+			"-c", "init.defaultBranch=main",
+			"-c", "commit.gpgsign=false",
+		}, args...)...)
 		cmd.Dir = dir
+		cmd.Env = env
 
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, "git %v: %s", args, out)
