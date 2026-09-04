@@ -292,8 +292,6 @@ func githubConfigured(server configsync.Tree) bool {
 
 // currentKeys reads the shared secrets from existing config trees so an
 // update never regenerates a key that is already in use.
-//
-//nolint:unused // the update and migrate flows are the callers.
 func (e *Engine) currentKeys(server, agent, chat configsync.Tree) Keys {
 	str := func(t configsync.Tree, path string) string {
 		v, _ := configsync.Get(t, path)
