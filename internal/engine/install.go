@@ -141,12 +141,10 @@ func (e *Engine) makeDirs() error {
 }
 
 func (e *Engine) freshFacts(ctx context.Context, a Answers) (Facts, error) {
-	keys, err := NewKeys()
-	if err != nil {
-		return Facts{}, err
-	}
-
-	id, err := NewInstanceID(e.Host.Hostname)
+	// A migrated or partially installed config already carries the shared
+	// secrets and the instance id, and the three files are paired against
+	// them; only what is missing is generated.
+	keys, id, err := e.resolveIdentity(e.loadTrees())
 	if err != nil {
 		return Facts{}, err
 	}

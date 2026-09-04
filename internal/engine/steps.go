@@ -290,6 +290,46 @@ func githubConfigured(server configsync.Tree) bool {
 	return ok && (v == "pat" || v == "app")
 }
 
+// resolveIdentity picks the shared secrets and the instance id to write.
+// Both flows go through it: a migrated or partially installed config
+// already carries values the other files are paired against, so only what
+// is missing is generated.
+func (e *Engine) resolveIdentity(existing Trees) (Keys, string, error) {
+	keys := e.currentKeys(existing.Server, existing.Agent, existing.Chat)
+
+	if keys.MCP == "" || keys.Agent == "" || keys.Chat == "" {
+		fresh, err := NewKeys()
+		if err != nil {
+			return Keys{}, "", err
+		}
+
+		if keys.MCP == "" {
+			keys.MCP = fresh.MCP
+		}
+
+		if keys.Agent == "" {
+			keys.Agent = fresh.Agent
+		}
+
+		if keys.Chat == "" {
+			keys.Chat = fresh.Chat
+		}
+	}
+
+	v, _ := configsync.Get(existing.Server, "instance.id")
+	id, _ := v.(string)
+
+	if id == "" {
+		var err error
+
+		if id, err = NewInstanceID(e.Host.Hostname); err != nil {
+			return Keys{}, "", err
+		}
+	}
+
+	return keys, id, nil
+}
+
 // currentKeys reads the shared secrets from existing config trees so an
 // update never regenerates a key that is already in use.
 func (e *Engine) currentKeys(server, agent, chat configsync.Tree) Keys {

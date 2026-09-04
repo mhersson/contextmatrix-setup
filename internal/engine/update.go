@@ -80,36 +80,13 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	// Existing values feed the opinionated tree so nothing is regenerated.
 	existing := e.loadTrees()
 	answers := AnswersFrom(existing)
-	facts := Facts{Layout: e.L, Gateway: e.gateway(ctx), Docker: e.Host.Docker, Keys: e.currentKeys(existing.Server, existing.Agent, existing.Chat)}
 
-	if facts.Keys.MCP == "" || facts.Keys.Agent == "" || facts.Keys.Chat == "" {
-		fresh, err := NewKeys()
-		if err != nil {
-			return err
-		}
-
-		if facts.Keys.MCP == "" {
-			facts.Keys.MCP = fresh.MCP
-		}
-
-		if facts.Keys.Agent == "" {
-			facts.Keys.Agent = fresh.Agent
-		}
-
-		if facts.Keys.Chat == "" {
-			facts.Keys.Chat = fresh.Chat
-		}
+	keys, instanceID, err := e.resolveIdentity(existing)
+	if err != nil {
+		return err
 	}
 
-	if v, ok := configsync.Get(existing.Server, "instance.id"); ok {
-		facts.InstanceID, _ = v.(string)
-	}
-
-	if facts.InstanceID == "" {
-		if facts.InstanceID, err = NewInstanceID(e.Host.Hostname); err != nil {
-			return err
-		}
-	}
+	facts := Facts{Layout: e.L, Gateway: e.gateway(ctx), Docker: e.Host.Docker, Keys: keys, InstanceID: instanceID}
 
 	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}}
 	oldTags := map[string]string{}
