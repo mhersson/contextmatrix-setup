@@ -51,3 +51,16 @@ func TestServerPathsListsLocationsOutsideStateDir(t *testing.T) {
 
 	assert.Equal(t, []string{"/home/u/outside/boards", "/var/lib/cm"}, paths)
 }
+
+func TestServiceForRendersFixedPath(t *testing.T) {
+	t.Setenv("PATH", "/ambient/bin:/usr/bin")
+
+	h := newHarness(t, true)
+
+	s := h.e.serviceFor("contextmatrix-agent", configsync.Tree{})
+	assert.Equal(t, h.e.Host.GoBin+":/usr/local/bin:/usr/bin:/bin", s.Env["PATH"])
+
+	h.e.Host.OS = "darwin"
+	s = h.e.serviceFor("contextmatrix-agent", configsync.Tree{})
+	assert.Equal(t, h.e.Host.GoBin+":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", s.Env["PATH"])
+}

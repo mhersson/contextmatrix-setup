@@ -73,7 +73,10 @@ never touched.
 
 Units are installer-owned. On Linux, customise with `systemctl --user edit
 <name>`; the installer never touches drop-ins. On macOS edit the config
-file, not the plist.
+file, not the plist. launchd loads every plist in `~/Library/LaunchAgents`
+at login, so a service the installer did not start (GitHub skipped, invalid
+config, no docker) still starts at the next login until the cause is fixed
+and `contextmatrix-setup update` is run.
 
 ## Config files
 

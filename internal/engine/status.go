@@ -22,12 +22,13 @@ type ServiceStatus struct {
 }
 
 type Status struct {
-	Repos    []RepoStatus
-	Services []ServiceStatus
-	Ports    map[string]int
-	Docker   bool
-	Images   map[string]string
-	Manager  string
+	Repos      []RepoStatus
+	Services   []ServiceStatus
+	Ports      map[string]int
+	Docker     bool
+	DockerHint string
+	Images     map[string]string
+	Manager    string
 }
 
 func (e *Engine) Status(ctx context.Context) (Status, error) {
@@ -38,7 +39,7 @@ func (e *Engine) Status(ctx context.Context) (Status, error) {
 
 	e.useRecordedManager(st.ServiceManager)
 
-	s := Status{Ports: map[string]int{}, Images: map[string]string{}, Docker: e.Host.Docker, Manager: e.Services.Kind()}
+	s := Status{Ports: map[string]int{}, Images: map[string]string{}, Docker: e.Host.Docker, DockerHint: e.Host.DockerHint, Manager: e.Services.Kind()}
 
 	for _, repo := range repos.Apps {
 		cached, _ := e.Git.Head(ctx, e.L.SrcDir(repo))
@@ -82,6 +83,10 @@ func (e *Engine) PrintStatus(s Status) {
 	}
 
 	e.logf("docker: %v   service manager: %s", s.Docker, s.Manager)
+
+	if !s.Docker && s.DockerHint != "" {
+		e.logf("%s", s.DockerHint)
+	}
 
 	for family, tag := range s.Images {
 		e.logf("%-22s %s", family, tag)

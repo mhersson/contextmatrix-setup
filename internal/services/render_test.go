@@ -128,6 +128,19 @@ func TestRenderLaunchd(t *testing.T) {
 	assert.Equal(t, wantLaunchd, string(RenderLaunchd(agentService())))
 }
 
+func TestRenderSystemdQuotesWhitespaceAndPercent(t *testing.T) {
+	s := agentService()
+	s.Env["HOME"] = "/home/a b"
+	s.Env["DOCKER_HOST"] = "unix:///run/user/1000%2Fdocker.sock"
+	s.Args = append(s.Args, "--name", "my agent")
+
+	out := string(RenderSystemd(s))
+	assert.Contains(t, out, "Environment=\"HOME=/home/a b\"\n")
+	assert.Contains(t, out, "Environment=\"DOCKER_HOST=unix:///run/user/1000%%2Fdocker.sock\"\n")
+	assert.Contains(t, out, "Environment=PATH=/usr/local/bin:/usr/bin:/bin\n", "a plain value renders unquoted")
+	assert.Contains(t, out, "ExecStart=/home/u/go/bin/contextmatrix-agent serve --config /home/u/.config/contextmatrix/agent.yaml --name \"my agent\"\n")
+}
+
 func TestRenderEscapesPlistText(t *testing.T) {
 	s := agentService()
 	s.Env["DOCKER_HOST"] = "unix:///a&b"

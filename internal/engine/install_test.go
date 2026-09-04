@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+	"github.com/mhersson/contextmatrix-setup/internal/services"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
@@ -149,6 +151,8 @@ func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 func TestInstallOpensBootstrapLinkInMultiMode(t *testing.T) {
 	h := newHarness(t, true)
 	h.runner.On("journalctl", "--user", "-u", "contextmatrix", "-f").Return(`msg="auth: bootstrap link" path=/auth/token/tok123`+"\n", "", 0)
+	gate := newFollowGate(h.e.Services, false)
+	h.e.Services = gate
 
 	var opened string
 
@@ -165,6 +169,109 @@ func TestInstallOpensBootstrapLinkInMultiMode(t *testing.T) {
 	require.NoError(t, h.e.Install(context.Background(), a))
 	assert.Equal(t, "http://localhost:18080/auth/token/tok123", opened)
 	assert.Contains(t, h.out.String(), "/auth/token/tok123")
+	assert.True(t, gate.attachedBeforeStart, "the log is followed before the server starts, or the line is missed")
+}
+
+func TestInstallFailedServerStartPrintsPlainURL(t *testing.T) {
+	h := newHarness(t, true)
+	h.runner.On("systemctl", "--user", "start", "contextmatrix").Return("", "Job for contextmatrix.service failed", 1)
+	h.e.Services = newFollowGate(h.e.Services, true)
+
+	opened := false
+	h.e.Browser = func(context.Context, string) error {
+		opened = true
+
+		return nil
+	}
+
+	a := DefaultAnswers()
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+
+	began := time.Now()
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+	assert.Less(t, time.Since(began), 2*time.Second, "no waiting for a link a server that did not start cannot log")
+
+	out := h.out.String()
+	assert.Contains(t, out, "start failed: systemctl --user start contextmatrix")
+	assert.Contains(t, out, "server URL: http://localhost:18080")
+	assert.NotContains(t, out, "first admin")
+	assert.False(t, opened)
+}
+
+func TestInstallNoLinkSeenNamesTheLogCommand(t *testing.T) {
+	h := newHarness(t, true)
+
+	a := DefaultAnswers()
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	out := h.out.String()
+	assert.Contains(t, out, "server URL: http://localhost:18080")
+	assert.Contains(t, out, "journalctl --user -u contextmatrix -n 50 | grep 'bootstrap link'")
+	assert.NotContains(t, out, "users may already exist")
+
+	h = newHarness(t, true)
+	h.e.Host.OS = "darwin"
+	h.e.Services = services.New("launchd", h.runner, h.e.L, 501)
+	h.runner.On("launchctl").Return("", "", 0)
+	h.runner.On("tail").Return("", "", 0)
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+	assert.Contains(t, h.out.String(), "grep 'bootstrap link' ~/Library/Logs/contextmatrix/contextmatrix.log")
+}
+
+func TestInstallWithoutServiceManagerPrintsStartCommands(t *testing.T) {
+	h := newHarness(t, true)
+	h.e.Host.ServiceManager = "none"
+	h.e.Host.ServiceManagerReason = "systemctl not found"
+	h.e.Services = services.New("none", h.runner, h.e.L, 1000)
+
+	a := DefaultAnswers()
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+	require.True(t, a.Services, "the flags and the wizard default to services on")
+
+	began := time.Now()
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+	assert.Less(t, time.Since(began), 2*time.Second, "no link can come from a server nobody started")
+
+	out := h.out.String()
+	assert.NotContains(t, out, "started")
+	assert.Contains(t, out, "services: no usable service manager (systemctl not found); start commands are printed instead")
+	assert.Contains(t, out, "start by hand")
+	assert.Contains(t, out, h.e.Host.Binary("contextmatrix")+" -config "+h.e.L.ServerConfig())
+	assert.Contains(t, out, "server URL: http://localhost:18080")
+	assert.Empty(t, systemctlCalls(h))
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, "none", st.ServiceManager)
+}
+
+func TestInstallLogsDockerHint(t *testing.T) {
+	h := newHarness(t, false)
+	h.e.Host.DockerHint = "docker is installed but your user cannot reach its socket"
+
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+	assert.Contains(t, h.out.String(), "docker not available")
+	assert.Contains(t, h.out.String(), "docker is installed but your user cannot reach its socket")
+
+	h.out.b = nil
+
+	s, err := h.e.Status(context.Background())
+	require.NoError(t, err)
+	h.e.PrintStatus(s)
+	assert.Contains(t, h.out.String(), "docker is installed but your user cannot reach its socket")
 }
 
 func TestInstallCopiesGitHubAppKey(t *testing.T) {
@@ -186,6 +293,53 @@ func TestInstallCopiesGitHubAppKey(t *testing.T) {
 
 	server, _, _ := configsync.LoadFile(h.e.L.ServerConfig())
 	assert.Equal(t, "app", get(t, server, "github.auth_mode"))
+}
+
+func TestInstallKeepsGitHubAppKeyWhenSourceIsDestination(t *testing.T) {
+	h := newHarness(t, true)
+	dst := filepath.Join(h.e.L.ServerStateDir(), "github-app.pem")
+	require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0o700))
+
+	require.NoError(t, os.WriteFile(dst, []byte("PEM"), 0o600))
+
+	a := DefaultAnswers()
+	a.GitHubMode = "app"
+	a.GitHubAppID = 1
+	a.GitHubInstallID = 2
+	a.GitHubKeyFile = dst
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	data, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	assert.Equal(t, "PEM", string(data), "copying a file onto itself must not truncate it")
+}
+
+func TestCopyFileThroughSymlinkToItself(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "key.pem")
+	link := filepath.Join(dir, "link.pem")
+
+	require.NoError(t, os.WriteFile(dst, []byte("PEM"), 0o600))
+	require.NoError(t, os.Symlink(dst, link))
+
+	require.NoError(t, copyFile(link, dst))
+
+	data, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	assert.Equal(t, "PEM", string(data))
+
+	other := filepath.Join(dir, "other.pem")
+	require.NoError(t, copyFile(link, other))
+
+	data, err = os.ReadFile(other)
+	require.NoError(t, err)
+	assert.Equal(t, "PEM", string(data))
+
+	info, err := os.Stat(other)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	assert.NoFileExists(t, other+".tmp")
 }
 
 func TestInstallFailsWhenBuildFails(t *testing.T) {

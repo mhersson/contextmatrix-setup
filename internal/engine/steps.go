@@ -98,7 +98,15 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 
 	merged, dropped := configsync.Merge(schema, user, opinionated)
 
+	// An old config may carry boards as a list, which has no single dir to
+	// force; Set would replace the whole list with one mapping.
+	_, boardsList := merged["boards"].([]any)
+
 	for k, v := range force {
+		if boardsList && strings.HasPrefix(k, "boards.") {
+			continue
+		}
+
 		configsync.Set(merged, k, v)
 	}
 
@@ -192,7 +200,7 @@ func fileHash(data []byte) string {
 
 func (e *Engine) serviceFor(repo string, server configsync.Tree) services.Service {
 	bin := e.Host.Binary(binaryFor(repo))
-	env := map[string]string{"HOME": e.L.Home, "PATH": e.path()}
+	env := map[string]string{"HOME": e.L.Home, "PATH": e.unitPath()}
 
 	// The docker host is a static machine fact, not a per-call decision, so
 	// this lookup does not take the caller's context.
@@ -223,6 +231,17 @@ func (e *Engine) serviceFor(repo string, server configsync.Tree) services.Servic
 	}
 
 	return s
+}
+
+// unitPath is the PATH a service runs with. It is fixed rather than copied
+// from the installer's environment: the unit text decides restarts byte for
+// byte, and the shell an update runs from must not be able to change it.
+func (e *Engine) unitPath() string {
+	if e.Host.OS == "darwin" {
+		return e.Host.GoBin + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+	}
+
+	return e.Host.GoBin + ":/usr/local/bin:/usr/bin:/bin"
 }
 
 // serverPaths lists every directory the server writes, expanded from the

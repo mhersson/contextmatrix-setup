@@ -12,7 +12,7 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
-// Migrate applies a migration plan: stops the old services, writes the
+// Migrate applies a migration plan: removes the old units, writes the
 // rewritten trees where Install will read them as the user's values, then
 // moves the remaining files and drops the old configs. Install must follow
 // to build, merge and start.
@@ -20,8 +20,11 @@ import (
 // Nothing in the old layout is touched before its replacement exists, so an
 // interrupted run leaves a rerun everything it needs to finish.
 func (e *Engine) Migrate(ctx context.Context, p migrate.Plan) error {
+	// The old units point at the config this run deletes; one left enabled
+	// would crash-loop at the next login if the install that follows
+	// declines services. Install writes fresh units when they are wanted.
 	for _, name := range repos.Apps {
-		_ = e.Services.Stop(ctx, name)
+		_ = e.Services.Remove(ctx, name)
 	}
 
 	if err := e.writeCarried(p); err != nil {

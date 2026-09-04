@@ -29,10 +29,16 @@ func RenderSystemd(s Service) []byte {
 
 	b.WriteString("[Service]\nType=simple\n")
 	fmt.Fprintf(&b, "WorkingDirectory=%s\n", s.WorkingDir)
-	fmt.Fprintf(&b, "ExecStart=%s %s\n", s.Binary, strings.Join(s.Args, " "))
+
+	args := make([]string, 0, len(s.Args)+1)
+	for _, a := range append([]string{s.Binary}, s.Args...) {
+		args = append(args, systemdWord(a))
+	}
+
+	fmt.Fprintf(&b, "ExecStart=%s\n", strings.Join(args, " "))
 
 	for _, k := range sortedEnv(s.Env) {
-		fmt.Fprintf(&b, "Environment=%s=%s\n", k, s.Env[k])
+		fmt.Fprintf(&b, "Environment=%s\n", systemdWord(k+"="+s.Env[k]))
 	}
 
 	b.WriteString("KillMode=mixed\nTimeoutStopSec=60\n\n")
@@ -56,6 +62,19 @@ func RenderSystemd(s Service) []byte {
 	b.WriteString("[Install]\nWantedBy=default.target\n")
 
 	return b.Bytes()
+}
+
+// systemdWord renders one word of a unit line: % is doubled so systemd does
+// not expand it as a specifier, and a word that whitespace or % would
+// otherwise split or mangle is double-quoted. A plain word renders as is.
+func systemdWord(v string) string {
+	if !strings.ContainsAny(v, " \t%") {
+		return v
+	}
+
+	v = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%").Replace(v)
+
+	return `"` + v + `"`
 }
 
 func RenderLaunchd(s Service) []byte {

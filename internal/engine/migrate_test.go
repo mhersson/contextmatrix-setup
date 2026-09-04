@@ -12,6 +12,7 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/migrate"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
@@ -142,4 +143,66 @@ func TestMigrateSkipsAConfigWithNoOldFile(t *testing.T) {
 	agent, _, err := configsync.LoadFile(l.AgentConfig())
 	require.NoError(t, err)
 	assert.Equal(t, "OLDAGENT", get(t, agent, "api_key"))
+}
+
+func TestInstallAfterMigrationForcesChangedAnswers(t *testing.T) {
+	h := newHarness(t, true)
+	l := h.e.L
+
+	writeOldLayout(t, l)
+
+	plan, err := migrate.Build(l, migrate.Detect(l), nil)
+	require.NoError(t, err)
+	require.NoError(t, h.e.Migrate(context.Background(), plan))
+
+	// What the wizard shows after a migration, with two values changed.
+	answers := AnswersFrom(Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
+	answers.ServerPort = 28080
+	answers.AuthMode = "none"
+
+	require.NoError(t, h.e.Install(context.Background(), answers))
+
+	server, _, err := configsync.LoadFile(l.ServerConfig())
+	require.NoError(t, err)
+	assert.Equal(t, 28080, get(t, server, "port"))
+	assert.Equal(t, "none", get(t, server, "auth.mode"))
+	assert.Equal(t, "OLDMCP", get(t, server, "mcp_api_key"), "carried secret stays")
+	assert.Equal(t, "T", get(t, server, "github.pat.token"), "carried token stays when the answer says skip")
+	assert.Equal(t, "pat", get(t, server, "github.auth_mode"))
+	assert.Equal(t, "~/contextmatrix-boards", get(t, server, "boards.dir"), "an unchanged answer forces nothing")
+
+	agent, _, err := configsync.LoadFile(l.AgentConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:28080", get(t, agent, "contextmatrix_url"))
+	assert.Equal(t, "http://172.17.0.1:28080", get(t, agent, "container_contextmatrix_url"))
+	assert.Equal(t, 9092, get(t, agent, "port"), "unchanged port stays carried")
+	assert.Equal(t, "OLDAGENT", get(t, agent, "api_key"))
+
+	chat, _, err := configsync.LoadFile(l.ChatConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:28080", get(t, chat, "contextmatrix_url"))
+}
+
+func TestMigrateRemovesOldUnits(t *testing.T) {
+	h := newHarness(t, true)
+	l := h.e.L
+
+	writeOldLayout(t, l)
+
+	unit := h.e.Services.UnitPath(repos.Agent)
+	require.NoError(t, os.MkdirAll(filepath.Dir(unit), 0o755))
+	require.NoError(t, os.WriteFile(unit, []byte("[Service]\nExecStart=/old/contextmatrix-agent serve --config ~/.config/contextmatrix-agent/serve.yaml\n"), 0o644))
+
+	plan, err := migrate.Build(l, migrate.Detect(l), nil)
+	require.NoError(t, err)
+	require.NoError(t, h.e.Migrate(context.Background(), plan))
+
+	calls := systemctlCalls(h)
+
+	for _, name := range repos.Apps {
+		assert.Contains(t, calls, "--user stop "+name)
+		assert.Contains(t, calls, "--user disable "+name, "a stopped but enabled unit crash-loops at the next login")
+	}
+
+	assert.NoFileExists(t, unit, "the old unit points at a config the migration deletes")
 }

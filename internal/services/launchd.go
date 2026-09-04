@@ -49,8 +49,10 @@ func (m *launchd) loaded(ctx context.Context, name string) bool {
 	return err == nil && res.ExitCode == 0
 }
 
-// Install writes the plist and loads it. launchd has no separate enable
-// step: a loaded RunAtLoad agent starts now and at every login. The log
+// Install writes the plist. launchd has no separate enable step and a
+// loaded RunAtLoad agent starts at once, so an unloaded label is left for
+// Start to bootstrap; a loaded one is reloaded only when the text changed,
+// which is the only way a running agent picks up a new plist. The log
 // directory is derived from the layout rather than s.LogFile, since the
 // manager owns that path (see logFile) and a caller-supplied LogFile string
 // must not dictate what gets created on disk.
@@ -70,11 +72,9 @@ func (m *launchd) Install(ctx context.Context, s Service) (bool, error) {
 		if err := m.ctl(ctx, "bootout", m.target(s.Name)); err != nil {
 			return true, err
 		}
-	}
 
-	if !m.loaded(ctx, s.Name) {
 		if err := m.ctl(ctx, "bootstrap", m.domain(), m.UnitPath(s.Name)); err != nil {
-			return changed, err
+			return true, err
 		}
 	}
 

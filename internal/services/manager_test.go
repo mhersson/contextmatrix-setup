@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -109,12 +110,17 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	}
 
 	// print reports the agent as loaded, so a changed plist is booted out
-	// first; bootstrap of an unloaded agent is covered below.
-	assert.Contains(t, args, []string{"bootout", "gui/501/com.github.mhersson.contextmatrix-agent"})
+	// and bootstrapped again so the running agent picks it up.
+	bootout := []string{"bootout", "gui/501/com.github.mhersson.contextmatrix-agent"}
+	bootstrap := []string{"bootstrap", "gui/501", m.UnitPath(Agent)}
+
+	assert.Contains(t, args, bootout)
+	assert.Contains(t, args, bootstrap)
+	assert.Less(t, indexOf(args, bootout), indexOf(args, bootstrap), "bootout precedes bootstrap")
 	assert.Contains(t, args, []string{"kickstart", "-k", "gui/501/com.github.mhersson.contextmatrix-agent"})
 }
 
-func TestLaunchdInstallBootstrapsWhenNotLoaded(t *testing.T) {
+func TestLaunchdInstallNeverBootstraps(t *testing.T) {
 	l := layout.New(t.TempDir(), nil)
 	f := run.NewFake()
 	f.On("launchctl", "print").Return("", "Could not find service", 113)
@@ -125,15 +131,22 @@ func TestLaunchdInstallBootstrapsWhenNotLoaded(t *testing.T) {
 	changed, err := m.Install(context.Background(), agentService())
 	require.NoError(t, err)
 	assert.True(t, changed)
-	require.NoError(t, m.Start(context.Background(), Agent))
 
+	bootstrap := []string{"bootstrap", "gui/501", m.UnitPath(Agent)}
+	assert.NotContains(t, argsOf(f), bootstrap, "writing a plist must not start the agent")
+	assert.NotContains(t, argsOf(f), []string{"bootout", "gui/501/com.github.mhersson.contextmatrix-agent"})
+
+	require.NoError(t, m.Start(context.Background(), Agent))
+	assert.Contains(t, argsOf(f), bootstrap)
+}
+
+func argsOf(f *run.Fake) [][]string {
 	args := [][]string{}
 	for _, c := range f.Calls() {
 		args = append(args, c.Args)
 	}
 
-	assert.Contains(t, args, []string{"bootstrap", "gui/501", m.UnitPath(Agent)})
-	assert.NotContains(t, args, []string{"bootout", "gui/501/com.github.mhersson.contextmatrix-agent"})
+	return args
 }
 
 func TestNoneManagerIsInert(t *testing.T) {
@@ -149,4 +162,14 @@ func TestNoneManagerIsInert(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, active)
 	require.NoError(t, m.Start(context.Background(), Server))
+}
+
+func indexOf(args [][]string, want []string) int {
+	for i, a := range args {
+		if slices.Equal(a, want) {
+			return i
+		}
+	}
+
+	return -1
 }

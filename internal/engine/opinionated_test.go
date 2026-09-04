@@ -8,6 +8,7 @@ import (
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 )
 
 func testFacts() Facts {
@@ -136,4 +137,106 @@ func TestOpinionatedBackends(t *testing.T) {
 	assert.Equal(t, "contextmatrix-chat-worker:def5678", get(t, tr.Chat, "base_image"))
 	assert.Equal(t, "~/.contextmatrix/chat/secrets", get(t, tr.Chat, "secrets_dir"))
 	assert.Equal(t, "~/.contextmatrix/chat/sessions", get(t, tr.Chat, "chat_run_dir"))
+}
+
+func TestForcedAnswersSwitchesGitHubBlock(t *testing.T) {
+	prefill := DefaultAnswers()
+	prefill.GitHubMode = "skip"
+
+	a := DefaultAnswers()
+	a.GitHubMode = "app"
+	a.GitHubAppID = 7
+	a.GitHubInstallID = 8
+	a.GitHubKeyFile = "/tmp/app.pem"
+
+	f := testFacts()
+	f.GitHubKey = "/home/u/.contextmatrix/server/github-app.pem"
+
+	force := forcedAnswers(a, prefill, Opinionated(a, f))
+	server := force[repos.Server]
+	assert.Equal(t, "app", server["github.auth_mode"])
+	assert.Equal(t, int64(7), server["github.app.app_id"])
+	assert.Equal(t, int64(8), server["github.app.installation_id"])
+	assert.Equal(t, "~/.contextmatrix/server/github-app.pem", server["github.app.private_key_path"])
+	assert.Empty(t, server["github.pat.token"], "the server rejects a populated other block")
+	assert.Empty(t, force[repos.Agent])
+	assert.Empty(t, force[repos.Chat])
+
+	_, has := server["port"]
+	assert.False(t, has, "an unchanged answer forces nothing")
+
+	a = DefaultAnswers()
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "ghp_new"
+
+	server = forcedAnswers(a, prefill, Opinionated(a, testFacts()))[repos.Server]
+	assert.Equal(t, "pat", server["github.auth_mode"])
+	assert.Equal(t, "ghp_new", server["github.pat.token"])
+	assert.Equal(t, int64(0), server["github.app.app_id"])
+	assert.Equal(t, int64(0), server["github.app.installation_id"])
+	assert.Empty(t, server["github.app.private_key_path"])
+
+	server = forcedAnswers(DefaultAnswers(), prefill, Opinionated(DefaultAnswers(), testFacts()))[repos.Server]
+	_, has = server["github.auth_mode"]
+	assert.False(t, has, "skip leaves a carried github block alone")
+}
+
+func TestForcedAnswersFollowsEachChangedField(t *testing.T) {
+	prefill := DefaultAnswers()
+	prefill.ServerPort = 8080
+	prefill.AgentPort = 9092
+	prefill.ChatPort = 9093
+	prefill.DefaultModel = "old/model"
+	prefill.BoardsName = "old-boards"
+
+	a := DefaultAnswers()
+	a.ServerPort = 28080
+	a.AgentPort = 29092
+	a.ChatPort = 29093
+	a.DefaultModel = "new/model"
+	a.OpenRouterKey = "or"
+	a.AAKey = "aa"
+	a.BoardsURL = "https://github.com/org/team.git"
+	a.TaskSkillsURL = "https://github.com/org/skills.git"
+	a.Normalize()
+
+	force := forcedAnswers(a, prefill, Opinionated(a, testFacts()))
+
+	assert.Equal(t, map[string]any{
+		"port":                           28080,
+		"backends.agent.url":             "http://localhost:29092",
+		"backends.chat.url":              "http://localhost:29093",
+		"backends.agent.default_model":   "new/model",
+		"backends.chat.default_model":    "new/model",
+		"llm_endpoint.type":              "openrouter",
+		"llm_endpoint.api_key":           "or",
+		"backends.agent.aa_api_key":      "aa",
+		"boards.dir":                     "~/.contextmatrix/boards/team",
+		"boards.git_remote_url":          "https://github.com/org/team.git",
+		"boards.git_clone_on_empty":      true,
+		"boards.git_auto_push":           true,
+		"task_skills.dir":                "~/.contextmatrix/task-skills",
+		"task_skills.git_remote_url":     "https://github.com/org/skills.git",
+		"task_skills.git_clone_on_empty": true,
+	}, force[repos.Server])
+
+	assert.Equal(t, map[string]any{
+		"port":                        29092,
+		"contextmatrix_url":           "http://localhost:28080",
+		"container_contextmatrix_url": "http://172.17.0.1:28080",
+		"default_model":               "new/model",
+	}, force[repos.Agent])
+
+	assert.Equal(t, map[string]any{
+		"port":                        29093,
+		"contextmatrix_url":           "http://localhost:28080",
+		"container_contextmatrix_url": "http://172.17.0.1:28080",
+	}, force[repos.Chat])
+
+	same := DefaultAnswers()
+	same.Normalize()
+
+	for repo, keys := range forcedAnswers(same, DefaultAnswers(), Opinionated(same, testFacts())) {
+		assert.Empty(t, keys, repo)
+	}
 }

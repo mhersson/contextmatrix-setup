@@ -67,6 +67,69 @@ func TestDetectDarwinLaunchd(t *testing.T) {
 	assert.Equal(t, "launchd", info.ServiceManager)
 }
 
+func TestDetectDockerPermissionDeniedHint(t *testing.T) {
+	f := run.NewFake()
+	f.Has("go")
+	f.Has("docker")
+	f.On("go", "env", "GOBIN").Return("/gobin\n", "", 0)
+	f.On("docker", "info").Return("", "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock", 1)
+
+	info, err := Detect(context.Background(), f, "linux", getenv(map[string]string{"HOME": "/home/u"}))
+	require.NoError(t, err)
+	assert.False(t, info.Docker)
+	assert.Contains(t, info.DockerHint, `"sudo usermod -aG docker $USER"`)
+	assert.Contains(t, info.DockerHint, `"contextmatrix-setup update"`)
+
+	info, err = Detect(context.Background(), f, "darwin", getenv(map[string]string{"HOME": "/Users/u"}))
+	require.NoError(t, err)
+	assert.Empty(t, info.DockerHint, "the group hint is a Linux thing")
+
+	f.On("docker", "info").Return("", "Cannot connect to the Docker daemon", 1)
+	info, err = Detect(context.Background(), f, "linux", getenv(map[string]string{"HOME": "/home/u"}))
+	require.NoError(t, err)
+	assert.Empty(t, info.DockerHint, "a missing daemon is not a group problem")
+}
+
+func TestDetectServiceManagerReason(t *testing.T) {
+	newFake := func(tools ...string) *run.Fake {
+		f := run.NewFake()
+		f.Has("go")
+		f.On("go", "env", "GOBIN").Return("/gobin\n", "", 0)
+
+		for _, tool := range tools {
+			f.Has(tool)
+		}
+
+		return f
+	}
+
+	env := getenv(map[string]string{"HOME": "/home/u"})
+
+	info, err := Detect(context.Background(), newFake(), "linux", env)
+	require.NoError(t, err)
+	assert.Equal(t, "none", info.ServiceManager)
+	assert.Equal(t, "systemctl not found", info.ServiceManagerReason)
+
+	f := newFake("systemctl")
+	f.On("systemctl", "--user", "is-system-running").Return("offline\n", "", 1)
+	info, err = Detect(context.Background(), f, "linux", env)
+	require.NoError(t, err)
+	assert.Equal(t, "none", info.ServiceManager)
+	assert.Equal(t, "systemctl --user is-system-running answered offline", info.ServiceManagerReason)
+
+	f = newFake("systemctl")
+	f.On("systemctl", "--user", "is-system-running").Return("running\n", "", 0)
+	info, err = Detect(context.Background(), f, "linux", env)
+	require.NoError(t, err)
+	assert.Equal(t, "systemd", info.ServiceManager)
+	assert.Empty(t, info.ServiceManagerReason)
+
+	info, err = Detect(context.Background(), newFake(), "darwin", env)
+	require.NoError(t, err)
+	assert.Equal(t, "none", info.ServiceManager)
+	assert.Equal(t, "launchctl not found", info.ServiceManagerReason)
+}
+
 func TestDetectNeedsGo(t *testing.T) {
 	f := run.NewFake()
 

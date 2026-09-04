@@ -147,7 +147,7 @@ func Run(in engine.Answers, info host.Info, open func(url string) error) (engine
 		}
 	}
 
-	rest := huh.NewForm(
+	groups := []*huh.Group{
 		huh.NewGroup(
 			huh.NewNote().Title("Artificial Analysis").Description("Optional. Enables live model quality scores for the selector. Free tier at https://artificialanalysis.ai"),
 			huh.NewInput().Title("Artificial Analysis API key").EchoMode(huh.EchoModePassword).Value(&a.AAKey),
@@ -161,12 +161,29 @@ func Run(in engine.Answers, info host.Info, open func(url string) error) (engine
 			huh.NewInput().Title("Boards repo URL").Value(&a.BoardsURL),
 			huh.NewInput().Title("Boards name").Description("Directory name under ~/.contextmatrix/boards. Derived from the URL when empty.").Value(&a.BoardsName),
 		),
-		huh.NewGroup(
+	}
+
+	// Without a service manager there is nothing to ask: the start commands
+	// are printed instead. Linger is a systemd concept, so macOS is not asked.
+	a.Linger = a.Linger && info.OS == "linux"
+
+	if info.ServiceManager == "none" {
+		a.Services, a.Linger = false, false
+	} else {
+		fields := []huh.Field{
 			huh.NewConfirm().Title("Install services?").Description("systemd user units on Linux, LaunchAgents on macOS. Started now and at login.").Value(&a.Services),
-			huh.NewConfirm().Title("Enable linger?").Description("Linux only: lets services run without an open login session. May prompt for a password.").
-				Value(&a.Linger),
-		),
-	)
+		}
+
+		if info.OS == "linux" {
+			fields = append(fields, huh.NewConfirm().Title("Enable linger?").
+				Description("Lets services run without an open login session. May prompt for a password.").
+				Value(&a.Linger))
+		}
+
+		groups = append(groups, huh.NewGroup(fields...))
+	}
+
+	rest := huh.NewForm(groups...)
 
 	if err := rest.Run(); err != nil {
 		return a, err
@@ -245,9 +262,17 @@ func prerequisites(info host.Info) string {
 		b.WriteString("  ok      docker\n")
 	} else {
 		b.WriteString("  warning docker not available: worker images are skipped and the backends stay disabled until a later update finds it\n")
+
+		if info.DockerHint != "" {
+			fmt.Fprintf(&b, "          %s\n", info.DockerHint)
+		}
 	}
 
 	fmt.Fprintf(&b, "  service manager: %s", info.ServiceManager)
+
+	if info.ServiceManagerReason != "" {
+		fmt.Fprintf(&b, " (%s)", info.ServiceManagerReason)
+	}
 
 	return b.String()
 }

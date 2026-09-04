@@ -5,7 +5,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -143,8 +145,63 @@ func newHarness(t *testing.T, docker bool) *harness {
 		Out:      out,
 		Browser:  func(context.Context, string) error { return nil },
 		RepoURL:  func(n string) string { return "file:///origin/" + n },
-		Path:     "/usr/bin:/bin",
 	}
 
 	return &harness{e: e, runner: f, git: git, images: img, out: out, home: home}
+}
+
+// followGate wraps a manager so a test can see whether the server log was
+// being followed before the server was started, the way a real journal
+// must be attached to catch a line the server logs once at startup. The
+// wrapped Follow, which yields the link, runs only after Start.
+type followGate struct {
+	services.Manager
+
+	following chan struct{}
+	started   chan struct{}
+
+	followOnce sync.Once
+	startOnce  sync.Once
+
+	// block makes Follow behave like a journal with nothing to say: it
+	// returns only when the context ends.
+	block bool
+
+	attachedBeforeStart bool
+}
+
+func newFollowGate(m services.Manager, block bool) *followGate {
+	return &followGate{Manager: m, following: make(chan struct{}), started: make(chan struct{}), block: block}
+}
+
+func (g *followGate) Follow(ctx context.Context, name string, w io.Writer) error {
+	g.followOnce.Do(func() { close(g.following) })
+
+	if g.block {
+		<-ctx.Done()
+
+		return nil
+	}
+
+	select {
+	case <-g.started:
+	case <-ctx.Done():
+		return nil
+	}
+
+	return g.Manager.Follow(ctx, name, w)
+}
+
+func (g *followGate) Start(ctx context.Context, name string) error {
+	if name == services.Server {
+		select {
+		case <-g.following:
+			g.attachedBeforeStart = true
+		case <-time.After(time.Second):
+		}
+
+		g.startOnce.Do(func() { close(g.started) })
+	}
+
+	return g.Manager.Start(ctx, name)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/mhersson/contextmatrix-setup/internal/host"
@@ -39,7 +38,6 @@ type Engine struct {
 	Browser  func(ctx context.Context, url string) error
 	Now      func() time.Time
 	RepoURL  func(name string) string
-	Path     string
 }
 
 func (e *Engine) now() time.Time {
@@ -56,14 +54,6 @@ func (e *Engine) repoURL(name string) string {
 	}
 
 	return repos.URL(name)
-}
-
-func (e *Engine) path() string {
-	if e.Path != "" {
-		return e.Path
-	}
-
-	return os.Getenv("PATH")
 }
 
 // useRecordedManager swaps in the inert manager when the state says "none":

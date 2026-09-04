@@ -16,13 +16,16 @@ import (
 )
 
 type Info struct {
-	OS             string
-	Hostname       string
-	UID            int
-	GoBin          string
-	Tools          map[string]string
-	Docker         bool
-	ServiceManager string
+	OS       string
+	Hostname string
+	UID      int
+	GoBin    string
+	Tools    map[string]string
+	Docker   bool
+	// DockerHint says why docker is unusable when the cause has a known fix.
+	DockerHint           string
+	ServiceManager       string
+	ServiceManagerReason string
 }
 
 //nolint:gochecknoglobals // Required is part of the exported contract; the wizard reads it.
@@ -58,9 +61,13 @@ func Detect(ctx context.Context, r run.Runner, goos string, getenv func(string) 
 	if _, ok := info.Tools["docker"]; ok {
 		res, err := r.Run(ctx, run.Cmd{Name: "docker", Args: []string{"info", "--format", "{{.ServerVersion}}"}})
 		info.Docker = err == nil && res.ExitCode == 0
+
+		if !info.Docker && goos == "linux" && strings.Contains(res.Stderr, "permission denied") {
+			info.DockerHint = dockerGroupHint
+		}
 	}
 
-	info.ServiceManager = detectServiceManager(ctx, r, goos, info.Tools)
+	info.ServiceManager, info.ServiceManagerReason = detectServiceManager(ctx, r, goos, info.Tools)
 
 	if h, err := os.Hostname(); err == nil {
 		info.Hostname = h
@@ -97,29 +104,50 @@ func goBinDir(ctx context.Context, r run.Runner, getenv func(string) string) (st
 	return filepath.Join(strings.Split(gopath, string(os.PathListSeparator))[0], "bin"), nil
 }
 
-func detectServiceManager(ctx context.Context, r run.Runner, goos string, tools map[string]string) string {
+// dockerGroupHint is the fix for the most common first-run docker failure
+// on Linux. The installer never runs sudo itself.
+const dockerGroupHint = `docker is installed but your user cannot reach its socket: run "sudo usermod -aG docker $USER", log out and in again, then run "contextmatrix-setup update"`
+
+// detectServiceManager returns the manager kind and, for "none", why: an
+// SSH session without a logind session and WSL without systemd both have
+// systemctl on PATH and no usable user manager, and the user should learn
+// which of the two it is.
+func detectServiceManager(ctx context.Context, r run.Runner, goos string, tools map[string]string) (string, string) {
 	switch goos {
 	case "darwin":
 		if _, ok := tools["launchctl"]; ok {
-			return "launchd"
+			return "launchd", ""
 		}
 
+		return "none", "launchctl not found"
 	case "linux":
 		if _, ok := tools["systemctl"]; !ok {
-			return "none"
+			return "none", "systemctl not found"
 		}
 
 		res, err := r.Run(ctx, run.Cmd{Name: "systemctl", Args: []string{"--user", "is-system-running"}})
-		if err == nil {
-			state := strings.TrimSpace(res.Stdout)
-			// degraded means some unit failed, the manager itself is usable.
-			if state == "running" || state == "degraded" {
-				return "systemd"
-			}
+		if err != nil {
+			return "none", fmt.Sprintf("systemctl --user is-system-running failed: %v", err)
 		}
-	}
 
-	return "none"
+		state := strings.TrimSpace(res.Stdout)
+		// degraded means some unit failed, the manager itself is usable.
+		if state == "running" || state == "degraded" {
+			return "systemd", ""
+		}
+
+		if state == "" {
+			state = strings.TrimSpace(res.Stderr)
+		}
+
+		if state == "" {
+			state = "nothing"
+		}
+
+		return "none", "systemctl --user is-system-running answered " + state
+	default:
+		return "none", "no service manager known for " + goos
+	}
 }
 
 // Missing returns required tools not found, sorted.
