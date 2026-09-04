@@ -12,6 +12,7 @@ type Stub struct {
 	prefix []string
 	res    Result
 	err    error
+	do     func()
 }
 
 func (s *Stub) Return(stdout, stderr string, code int) *Stub {
@@ -22,6 +23,14 @@ func (s *Stub) Return(stdout, stderr string, code int) *Stub {
 
 func (s *Stub) Fail(err error) *Stub {
 	s.err = err
+
+	return s
+}
+
+// Do registers a callback run when the stub matches, for tests that need a
+// side effect the fake cannot produce, such as a rebuilt file on disk.
+func (s *Stub) Do(fn func()) *Stub {
+	s.do = fn
 
 	return s
 }
@@ -66,6 +75,10 @@ func (f *Fake) Run(_ context.Context, c Cmd) (Result, error) {
 	best := f.match(c)
 	if best == nil {
 		return Result{ExitCode: 127, Stderr: "fake: unscripted " + c.Name + " " + strings.Join(c.Args, " ")}, nil
+	}
+
+	if best.do != nil {
+		best.do()
 	}
 
 	return best.res, best.err
