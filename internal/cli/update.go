@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/selfupdate"
 )
 
@@ -25,7 +26,14 @@ func newUpdateCmd() *cobra.Command {
 			}
 
 			if !noSelf {
-				if err := selfupdate.Run(ctx, selfupdate.Options{L: e.L, R: e.R, Git: e.Git, Out: e.Out, Args: os.Args}); err != nil {
+				opts := selfupdate.Options{L: e.L, R: e.R, Git: e.Git, Out: e.Out, Args: os.Args}
+
+				// A repo base override applies to the installer's own repo too.
+				if e.RepoURL != nil {
+					opts.URL = e.RepoURL(repos.Setup)
+				}
+
+				if err := selfupdate.Run(ctx, opts); err != nil {
 					return err
 				}
 			}

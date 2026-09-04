@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
@@ -40,6 +41,12 @@ func newEngine(ctx context.Context, out io.Writer) (*engine.Engine, error) {
 		Browser: func(ctx context.Context, url string) error {
 			return host.OpenBrowser(ctx, r, runtime.GOOS, url)
 		},
+	}
+
+	// Test-only: point the clones at local bare repos so the end-to-end
+	// tests never reach GitHub.
+	if base := os.Getenv("CONTEXTMATRIX_SETUP_REPO_BASE"); base != "" {
+		eng.RepoURL = func(name string) string { return "file://" + filepath.Join(base, name+".git") }
 	}
 
 	return eng, nil
