@@ -68,3 +68,14 @@ func TestFakeScriptsAndRecords(t *testing.T) {
 	require.Len(t, calls, 3)
 	assert.Equal(t, "/x", calls[0].Dir)
 }
+
+func TestFakeLaterStubWinsOnEqualPrefix(t *testing.T) {
+	f := NewFake()
+	f.On("make", "install").Return("first", "", 0)
+	f.On("make", "install").Return("", "boom", 2)
+
+	res, err := f.Run(context.Background(), Cmd{Name: "make", Args: []string{"install"}})
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.ExitCode)
+	assert.Equal(t, "boom", res.Stderr)
+}
