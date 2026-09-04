@@ -86,9 +86,18 @@ func TestBuildRewritesPathsAndListsMoves(t *testing.T) {
 		to[m.From] = m.To
 	}
 
-	assert.Equal(t, l.ServerConfig(), to[l.OldServerConfig()])
-	assert.Equal(t, l.AgentConfig(), to[l.OldAgentConfig()])
-	assert.Equal(t, l.ChatConfig(), to[l.OldChatConfig()])
+	// The three configs are rewritten in place and their old files deleted
+	// last, so they are removals, never moves.
+	assert.True(t, p.HasServer)
+	assert.True(t, p.HasAgent)
+	assert.True(t, p.HasChat)
+	assert.Equal(t, []string{l.OldServerConfig(), l.OldAgentConfig(), l.OldChatConfig()}, p.Remove)
+
+	for _, old := range []string{l.OldServerConfig(), l.OldAgentConfig(), l.OldChatConfig()} {
+		_, moved := to[old]
+		assert.False(t, moved, old)
+	}
+
 	assert.Equal(t, filepath.Join(l.ServerStateDir(), "auth.db"), to[filepath.Join(l.OldStateDir, "auth.db")])
 	assert.Equal(t, l.WorkflowSkillsDir(), to[l.OldWorkflowSkillsDir()])
 	_, movesBoards := to[filepath.Join(l.Home, "contextmatrix-boards")]
@@ -125,6 +134,35 @@ func TestBuildHandlesBoardsList(t *testing.T) {
 	list := p.Server["boards"].([]any)
 	assert.Equal(t, "~/a", list[0].(map[string]any)["dir"])
 	assert.Equal(t, "~/.contextmatrix/boards/b", list[1].(map[string]any)["dir"])
+}
+
+func TestBuildFlagsAConfigWithNoOldFile(t *testing.T) {
+	l := layout.New(t.TempDir(), nil)
+	write(t, l.OldAgentConfig(), "port: 9092\napi_key: AGENT\n")
+
+	p, err := Build(l, Detect(l), nil)
+	require.NoError(t, err)
+
+	assert.False(t, p.HasServer)
+	assert.True(t, p.HasAgent)
+	assert.False(t, p.HasChat)
+	assert.Equal(t, []string{l.OldAgentConfig()}, p.Remove)
+}
+
+func TestBuildReadsInstanceIDAfterItMoved(t *testing.T) {
+	l := layout.New(t.TempDir(), nil)
+	write(t, l.OldServerConfig(), "port: 8080\n")
+	write(t, filepath.Join(l.ServerStateDir(), "instance_id"), "box-abc123\n")
+
+	p, err := Build(l, Detect(l), nil)
+	require.NoError(t, err)
+
+	v, _ := configsync.Get(p.Server, "instance.id")
+	assert.Equal(t, "box-abc123", v, "a rerun reads the id from wherever it now lives")
+
+	for _, m := range p.Moves {
+		assert.NotEqual(t, filepath.Join(l.OldStateDir, "instance_id"), m.From)
+	}
 }
 
 func TestApplyMovesAndRefusesOverwrite(t *testing.T) {

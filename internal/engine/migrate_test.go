@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/migrate"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
@@ -72,4 +73,73 @@ func TestMigrateThenInstallCarriesValuesOver(t *testing.T) {
 
 	unit, _ := os.ReadFile(h.e.Services.UnitPath("contextmatrix"))
 	assert.Contains(t, string(unit), "-"+filepath.Join(l.Home, "contextmatrix-boards"), "kept-in-place boards dir is writable")
+}
+
+func writeOldLayout(t *testing.T, l layout.Layout) {
+	t.Helper()
+
+	write := func(p, s string) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(s), 0o600))
+	}
+
+	write(l.OldServerConfig(), "port: 8080\nmcp_api_key: OLDMCP\ngithub:\n  auth_mode: pat\n  pat:\n    token: T\nboards:\n  dir: ~/contextmatrix-boards\n")
+	write(l.OldAgentConfig(), "port: 9092\napi_key: OLDAGENT\n")
+	write(l.OldChatConfig(), "port: 9093\napi_key: OLDCHAT\n")
+	write(filepath.Join(l.OldStateDir, "master.key"), "K")
+	write(filepath.Join(l.OldStateDir, "instance_id"), "oldbox-111111\n")
+	write(filepath.Join(l.OldWorkflowSkillsDir(), "create-plan.md"), "old skill\n")
+}
+
+func TestMigrateIsRerunnable(t *testing.T) {
+	h := newHarness(t, true)
+	l := h.e.L
+
+	writeOldLayout(t, l)
+
+	first, err := migrate.Build(l, migrate.Detect(l), nil)
+	require.NoError(t, err)
+	require.NoError(t, h.e.Migrate(context.Background(), first))
+
+	// The second run detects nothing left to migrate. It must not write a
+	// near-empty tree over the config the first run carried.
+	second, err := migrate.Build(l, migrate.Detect(l), nil)
+	require.NoError(t, err)
+	require.NoError(t, h.e.Migrate(context.Background(), second))
+
+	server, _, err := configsync.LoadFile(l.ServerConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "OLDMCP", get(t, server, "mcp_api_key"))
+	assert.Equal(t, "oldbox-111111", get(t, server, "instance.id"))
+	assert.Equal(t, "T", get(t, server, "github.pat.token"))
+
+	data, err := os.ReadFile(filepath.Join(l.ServerStateDir(), "master.key"))
+	require.NoError(t, err)
+	assert.Equal(t, "K", string(data))
+
+	st, _, err := state.Load(l.StateFile())
+	require.NoError(t, err)
+	require.NotNil(t, st.Migration)
+	assert.Contains(t, st.Migration.From, l.OldServerConfig(), "the rerun must not erase the record")
+}
+
+func TestMigrateSkipsAConfigWithNoOldFile(t *testing.T) {
+	h := newHarness(t, true)
+	l := h.e.L
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(l.OldAgentConfig()), 0o755))
+	require.NoError(t, os.WriteFile(l.OldAgentConfig(), []byte("port: 9092\napi_key: OLDAGENT\n"), 0o600))
+
+	plan, err := migrate.Build(l, migrate.Detect(l), nil)
+	require.NoError(t, err)
+	assert.False(t, plan.HasServer)
+
+	require.NoError(t, h.e.Migrate(context.Background(), plan))
+
+	_, err = os.Stat(l.ServerConfig())
+	assert.True(t, os.IsNotExist(err), "a config with no old file is never written")
+
+	agent, _, err := configsync.LoadFile(l.AgentConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "OLDAGENT", get(t, agent, "api_key"))
 }

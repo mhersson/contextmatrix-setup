@@ -86,10 +86,22 @@ type Move struct {
 }
 
 type Plan struct {
-	Server   configsync.Tree
-	Agent    configsync.Tree
-	Chat     configsync.Tree
-	Moves    []Move
+	Server configsync.Tree
+	Agent  configsync.Tree
+	Chat   configsync.Tree
+
+	// Has* says whether the tree was read from an old config file. A tree
+	// with no source carries nothing worth writing, and writing it would
+	// replace an already migrated file with a near-empty one.
+	HasServer bool
+	HasAgent  bool
+	HasChat   bool
+
+	Moves []Move
+
+	// Remove holds the old config files, deleted only once the new ones
+	// have been written.
+	Remove   []string
 	RepoDirs []RepoDir
 	Sources  []string
 }
@@ -120,18 +132,17 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 		return s
 	}
 
-	// Config files move to their new names; the merged content overwrites
-	// them right after, so this is a rename, never a copy.
-	if f.ServerConfig != "" {
-		p.Moves = append(p.Moves, Move{From: f.ServerConfig, To: l.ServerConfig()})
-	}
+	// Config files are not moved: the rewritten tree is written under the
+	// new name first, and the old file is deleted last. An interrupted run
+	// therefore still finds the old file and rebuilds the same content.
+	p.HasServer = f.ServerConfig != ""
+	p.HasAgent = f.AgentConfig != ""
+	p.HasChat = f.ChatConfig != ""
 
-	if f.AgentConfig != "" {
-		p.Moves = append(p.Moves, Move{From: f.AgentConfig, To: l.AgentConfig()})
-	}
-
-	if f.ChatConfig != "" {
-		p.Moves = append(p.Moves, Move{From: f.ChatConfig, To: l.ChatConfig()})
+	for _, old := range []string{f.ServerConfig, f.AgentConfig, f.ChatConfig} {
+		if old != "" {
+			p.Remove = append(p.Remove, old)
+		}
 	}
 
 	// Server state files: the old config may point anywhere; default to the
@@ -155,11 +166,23 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 		}
 	}
 
+	// The id lives in a file in the old layout. A rerun may already have
+	// moved that file, so read from whichever location still holds it.
 	if v, ok := configsync.Get(p.Server, "instance.id"); !ok || v == "" {
-		idFile := filepath.Join(l.OldStateDir, "instance_id")
-		if data, err := os.ReadFile(idFile); err == nil && strings.TrimSpace(string(data)) != "" {
+		oldID := filepath.Join(l.OldStateDir, "instance_id")
+		newID := filepath.Join(l.ServerStateDir(), "instance_id")
+
+		source := oldID
+		if !exists(source) {
+			source = newID
+		}
+
+		if data, err := os.ReadFile(source); err == nil && strings.TrimSpace(string(data)) != "" {
 			configsync.Set(p.Server, "instance.id", strings.TrimSpace(string(data)))
-			p.Moves = append(p.Moves, Move{From: idFile, To: filepath.Join(l.ServerStateDir(), "instance_id")})
+		}
+
+		if exists(oldID) {
+			p.Moves = append(p.Moves, Move{From: oldID, To: newID})
 		}
 	}
 
