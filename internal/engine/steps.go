@@ -35,6 +35,17 @@ func (e *Engine) syncRepos(ctx context.Context, names []string) (map[string]stri
 }
 
 func (e *Engine) buildBinary(ctx context.Context, repo string) error {
+	// The server bundles a frontend its install target builds, and a fresh
+	// clone has no node_modules, so the dependencies go in first. Only the
+	// server has one; the backends have no frontend target at all.
+	if repo == repos.Server {
+		e.logf("%-22s make install-frontend", repo)
+
+		if err := e.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"install-frontend"}, Dir: e.L.SrcDir(repo)}, e.Out); err != nil {
+			return fmt.Errorf("build %s: %w", repo, err)
+		}
+	}
+
 	e.logf("%-22s make install", repo)
 
 	if err := e.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"install"}, Dir: e.L.SrcDir(repo)}, e.Out); err != nil {

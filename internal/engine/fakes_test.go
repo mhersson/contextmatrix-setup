@@ -114,6 +114,7 @@ func newHarness(t *testing.T, docker bool) *harness {
 
 	f := run.NewFake()
 	f.On("make", "install").Return("", "", 0)
+	f.On("make", "install-frontend").Return("", "", 0)
 	f.On("systemctl").Return("", "", 0)
 	f.On("journalctl").Return("", "", 0)
 	f.On("loginctl").Return("", "", 0)

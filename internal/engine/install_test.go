@@ -72,6 +72,26 @@ func TestInstallFreshWithDocker(t *testing.T) {
 	agentUnit, _ := os.ReadFile(h.e.Services.UnitPath("contextmatrix-agent"))
 	assert.Contains(t, string(agentUnit), "ExecStart="+h.e.Host.GoBin+"/contextmatrix-agent serve --config "+h.e.L.AgentConfig())
 
+	// The server installs its frontend dependencies before its binary; a
+	// backend has no frontend and must never see that target.
+	var serverMake []string
+
+	for _, c := range h.runner.Calls() {
+		if c.Name != "make" {
+			continue
+		}
+
+		if c.Dir == h.e.L.SrcDir("contextmatrix") {
+			serverMake = append(serverMake, c.Args[0])
+
+			continue
+		}
+
+		assert.NotContains(t, c.Args, "install-frontend", c.Dir)
+	}
+
+	assert.Equal(t, []string{"install-frontend", "install"}, serverMake)
+
 	// Images built for both backends.
 	assert.Equal(t, []string{"contextmatrix-agent-worker:bbbbbbb", "contextmatrix-chat-worker:ccccccc"}, h.images.built)
 

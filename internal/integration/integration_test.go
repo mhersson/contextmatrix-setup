@@ -34,6 +34,7 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.Contains(t, server, "enabled: true")
 
 	log := e.stubLog()
+	assert.Contains(t, log, "make install-frontend contextmatrix")
 	assert.Contains(t, log, "make docker-worker contextmatrix-agent")
 	assert.Contains(t, log, "make docker-worker contextmatrix-chat")
 	assert.Equal(t, 3, strings.Count(log, "systemctl --user start "))
@@ -59,6 +60,7 @@ func TestInstallUpdateCycle(t *testing.T) {
 	log = e.stubLog()
 	assert.Contains(t, log, "make install contextmatrix-agent")
 	assert.NotContains(t, log, "make install contextmatrix-chat")
+	assert.NotContains(t, log, "make install-frontend", "only the server has a frontend")
 	assert.Contains(t, log, "make docker-worker contextmatrix-agent")
 	assert.Contains(t, log, "systemctl --user restart contextmatrix-agent")
 	assert.NotContains(t, log, "systemctl --user restart contextmatrix-chat")

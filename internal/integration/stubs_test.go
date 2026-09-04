@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -26,6 +27,12 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+
+	// The scenarios assert systemd behaviour, and on darwin the launchd
+	// manager would drive the developer's real GUI domain.
+	if runtime.GOOS != "linux" {
+		t.Skip("integration scenarios assert systemd behaviour; macOS is covered by the README smoke checklist")
+	}
 
 	root := t.TempDir()
 	e := &env{
@@ -53,6 +60,7 @@ func newEnv(t *testing.T) *env {
 
 	e.writeStub("make", `#!/bin/sh
 case "$1" in
+  install-frontend) echo "make install-frontend $(basename "$PWD")" >> "$STUB_LOG" ;;
   install)
     name=$(basename "$PWD")
     cat > "$GOBIN/$name" <<EOF
@@ -92,6 +100,17 @@ echo "journalctl $*" >> "$STUB_LOG"
 case "$*" in *" -f "*) echo 'msg="auth: bootstrap link" path=/auth/token/stub-token' ;; esac
 exit 0
 `)
+
+	// Inert stubs for the macOS tools: the guard above already keeps the
+	// suite off launchd, and these make sure a removed guard still cannot
+	// reach the real binaries. print exits 113 so nothing looks loaded.
+	e.writeStub("launchctl", `#!/bin/sh
+echo "launchctl $*" >> "$STUB_LOG"
+case "$1" in print) exit 113 ;; esac
+exit 0
+`)
+
+	e.writeStub("open", "#!/bin/sh\necho \"open $1\" >> \"$STUB_LOG\"\nexit 0\n")
 
 	e.writeStub("loginctl", "#!/bin/sh\nexit 0\n")
 	e.writeStub("xdg-open", "#!/bin/sh\necho \"xdg-open $1\" >> \"$STUB_LOG\"\nexit 0\n")
