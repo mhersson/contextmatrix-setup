@@ -8,11 +8,50 @@ The installer is opinionated: high ports (18080, 19092, 19093), every file under
 needs. Everything else keeps the upstream default; edit the config files by hand
 for the rest, your values are never overwritten.
 
+![The install wizard's welcome screen](assets/welcome.png)
+
 ## Prerequisites
+
+### Tools
 
 git, go (1.26 or newer), make, node and npm (server frontend build). Docker is
 optional: without it the install completes, the worker images are skipped, and
-the backends stay disabled until a later `update` finds docker.
+the backends stay disabled until a later `update` finds docker. The welcome
+screen checks all of these before the first question.
+
+### Have these ready
+
+The wizard asks for the items below, one screen each. With them at hand the
+first install is a single sitting. Every item also has a flag, see
+[Install](#install).
+
+| Item                                       | Where to get it                                                                                                                                                                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **OpenRouter API key**                     | <https://openrouter.ai/keys>. Every run and chat goes through OpenRouter; the server forwards the key to the workers. Leave it empty to add it to `server.yaml` later, but nothing runs until then.                                                                                   |
+| **Default model**                          | An OpenRouter model slug. The default is `deepseek/deepseek-v4-flash`. Both backends use it; chat cannot start without one.                                                                                                                                                           |
+| **GitHub credential**                      | A GitHub App or a personal access token, see below. Without one the server does not start.                                                                                                                                                                                            |
+| **Artificial Analysis API key** (optional) | Create an account at <https://artificialanalysis.ai> (free tier) and generate a key on your account page. Gives the model selector live quality scores.                                                                                                                               |
+| **Boards repo URL** (optional)             | The `https://` URL of a GitHub repo the credential above can push to, for example `https://github.com/you/contextmatrix-boards.git`. Create it empty; the server clones it and pushes the first board. Without a URL the boards live in a local repo under `~/.contextmatrix/boards`. |
+| **Task-skills repo URL** (optional)        | The `https://` URL of a repo of task skills the agents read. Without one the agents read an empty local directory.                                                                                                                                                                    |
+
+**GitHub App or PAT?** Pick the App on a personal GitHub account: you create
+and install it yourself, workers receive one-hour tokens scoped to the repos
+you pick, and nothing long-lived leaves the server. Pick a PAT on a corporate
+account, where creating an App usually needs an organisation admin and a token
+needs only you.
+
+- **App**: have the App ID, the installation ID and the downloaded private key
+  (`.pem` file) ready; the installer copies the key under `~/.contextmatrix`.
+  Install the App on the boards repo, the task-skills repo and every project
+  repo. Creation steps and the permission list are in
+  [github-auth-setup.md](https://github.com/mhersson/contextmatrix/blob/main/docs/github-auth-setup.md).
+- **PAT**: a classic token with the `repo` scope, or a fine-grained one with
+  the permissions listed in the same document. The wizard opens GitHub's
+  new-token page with the `repo` scope prefilled, so this is the one item you
+  can create mid-wizard.
+
+The remaining questions (login mode, ports, services) have defaults that suit
+a laptop.
 
 ## Install
 
