@@ -3,6 +3,7 @@ package wizard
 import (
 	"testing"
 
+	"github.com/charmbracelet/huh"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
@@ -33,4 +34,12 @@ func TestStepsNeverAskForServicesWithoutAManager(t *testing.T) {
 	info := host.Info{OS: "linux", ServiceManager: "none"}
 
 	assert.NotContains(t, Steps(engine.Known{}, info), "services")
+}
+
+func TestNoteShowsMarkupCharactersAsWritten(t *testing.T) {
+	text := "$DBUS_SESSION_BUS_ADDRESS is *not* set; see `journalctl` or C:\\path"
+
+	view := huh.NewNote().Description(note(text)).View()
+
+	assert.Contains(t, view, text)
 }

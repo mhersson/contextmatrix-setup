@@ -30,8 +30,8 @@ func AskMigrate(found migrate.Found) (bool, error) {
 
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewNote().Title("Existing install found").
-			Description("These files use the apps' default locations:\n  "+strings.Join(found.Sources(), "\n  ")+
-				"\n\nMigrating moves them under ~/.contextmatrix and ~/.config/contextmatrix and carries every value over."),
+			Description(note("These files use the apps' default locations:\n  "+strings.Join(found.Sources(), "\n  ")+
+				"\n\nMigrating moves them under ~/.contextmatrix and ~/.config/contextmatrix and carries every value over.")),
 		huh.NewConfirm().Title("Migrate this install?").Value(&yes),
 	))
 
@@ -142,7 +142,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 	}
 
 	groups := []*huh.Group{
-		huh.NewGroup(huh.NewNote().Title("Welcome").Description(intro)),
+		huh.NewGroup(huh.NewNote().Title("Welcome").Description(note(intro))),
 	}
 
 	if asked[stepLogin] {
@@ -209,7 +209,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 			}
 
 			return huh.NewForm(huh.NewGroup(
-				huh.NewNote().Title("Personal access token").Description("Create one at "+patPageURL),
+				huh.NewNote().Title("Personal access token").Description(note("Create one at "+patPageURL)),
 				huh.NewInput().Title("Token").EchoMode(huh.EchoModePassword).Value(&a.GitHubPAT),
 			)), nil
 		case mode == "app":
@@ -293,7 +293,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 		}
 
 		return huh.NewForm(huh.NewGroup(
-			huh.NewNote().Title("Summary").Description(Summary(a)),
+			huh.NewNote().Title("Summary").Description(note(Summary(a))),
 			huh.NewConfirm().Title("Install with these settings?").Value(&ok),
 		)), nil
 	}
@@ -326,6 +326,12 @@ func Summary(a engine.Answers) string {
 			"GitHub          %s\nAA key          %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
 		a.AuthMode, a.ServerPort, a.AgentPort, a.ChatPort, mask(a.OpenRouterKey), a.DefaultModel,
 		a.GitHubMode, mask(a.AAKey), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
+}
+
+// note escapes the characters huh renders as markup in a note description
+// (_ * ` and \), so paths, URLs and error messages show as written.
+func note(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "_", `\_`, "*", `\*`, "`", "\\`").Replace(s)
 }
 
 func or(v, fallback string) string {
