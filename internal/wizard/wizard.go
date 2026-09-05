@@ -15,10 +15,11 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/migrate"
 )
 
-const welcome = `This installer is opinionated. It uses high ports (18080, 19092, 19093),
-keeps every file under ~/.contextmatrix and one config directory, and exposes
-only the settings a local setup needs. Everything else keeps the upstream
-default; edit the config files by hand for the rest.`
+// welcome has no line breaks of its own: the note wraps it to the panel.
+const welcome = "This installer is opinionated. It uses high ports (18080, 19092, 19093), " +
+	"keeps every file under ~/.contextmatrix and one config directory, and exposes " +
+	"only the settings a local setup needs. Everything else keeps the upstream " +
+	"default; edit the config files by hand for the rest."
 
 // patPageURL is GitHub's new-token page with the scopes prefilled. The PAT
 // step both opens it and prints it, so the two can never drift apart.
@@ -34,27 +35,38 @@ func AskMigrate(found migrate.Found) (bool, error) {
 		huh.NewConfirm().Title("Migrate this install?").Value(&yes),
 	))
 
-	return yes, form.Run()
+	return yes, runSteps(func() (*huh.Form, error) { return form, nil })
 }
 
+// AskMoveRepos asks once per checkout, all on one screen.
 func AskMoveRepos(dirs []migrate.RepoDir) (map[string]bool, error) {
 	out := map[string]bool{}
 
-	for _, d := range dirs {
-		move := false
+	if len(dirs) == 0 {
+		return out, nil
+	}
 
-		form := huh.NewForm(huh.NewGroup(
+	moves := make([]bool, len(dirs))
+	groups := make([]*huh.Group, 0, len(dirs))
+
+	for i, d := range dirs {
+		groups = append(groups, huh.NewGroup(
 			huh.NewConfirm().
 				Title(fmt.Sprintf("Move %s (%s) under ~/.contextmatrix?", d.Key, d.Path)).
 				Description("Keep it in place if you also use this checkout yourself.").
 				Affirmative("Move").Negative("Keep").
-				Value(&move),
+				Value(&moves[i]),
 		))
-		if err := form.Run(); err != nil {
-			return nil, err
-		}
+	}
 
-		out[d.Key] = move
+	form := huh.NewForm(groups...)
+
+	if err := runSteps(func() (*huh.Form, error) { return form, nil }); err != nil {
+		return nil, err
+	}
+
+	for i, d := range dirs {
+		out[d.Key] = moves[i]
 	}
 
 	return out, nil
@@ -130,7 +142,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 	}
 
 	groups := []*huh.Group{
-		huh.NewGroup(huh.NewNote().Title("ContextMatrix setup").Description(intro)),
+		huh.NewGroup(huh.NewNote().Title("Welcome").Description(intro)),
 	}
 
 	if asked[stepLogin] {
@@ -183,126 +195,112 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 
 	first := huh.NewForm(groups...)
 
-	if err := first.Run(); err != nil {
-		return a, err
-	}
+	// The GitHub credentials asked for depend on the mode just chosen, so
+	// their form is built only once the first one is done.
+	credentials := func() (*huh.Form, error) {
+		switch mode := a.GitHubMode; {
+		case !asked[stepGitHub]:
+			return nil, nil
+		case mode == "pat":
+			if open != nil {
+				// The note prints the URL as well, so a browser that will
+				// not open is nothing to report.
+				_ = open(patPageURL)
+			}
 
-	// The GitHub credentials asked for depend on the mode just chosen, so they
-	// run as their own form rather than as hidden groups of the first one.
-	switch mode := a.GitHubMode; {
-	case !asked[stepGitHub]:
-	case mode == "pat":
-		if open != nil {
-			// The note prints the URL as well, so a browser that will not
-			// open is nothing to report.
-			_ = open(patPageURL)
-		}
-
-		pat := huh.NewForm(huh.NewGroup(
-			huh.NewNote().Title("Personal access token").Description("Create one at "+patPageURL),
-			huh.NewInput().Title("Token").EchoMode(huh.EchoModePassword).Value(&a.GitHubPAT),
-		))
-		if err := pat.Run(); err != nil {
-			return a, err
-		}
-	case mode == "app":
-		app := huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("App id").Value(&appID),
-			huh.NewInput().Title("Installation id").Value(&installID),
-			huh.NewInput().Title("Private key file").Description("Copied to ~/.contextmatrix/server/github-app.pem").Value(&a.GitHubKeyFile),
-		))
-		if err := app.Run(); err != nil {
-			return a, err
+			return huh.NewForm(huh.NewGroup(
+				huh.NewNote().Title("Personal access token").Description("Create one at "+patPageURL),
+				huh.NewInput().Title("Token").EchoMode(huh.EchoModePassword).Value(&a.GitHubPAT),
+			)), nil
+		case mode == "app":
+			return huh.NewForm(huh.NewGroup(
+				huh.NewInput().Title("App id").Value(&appID),
+				huh.NewInput().Title("Installation id").Value(&installID),
+				huh.NewInput().Title("Private key file").Description("Copied to ~/.contextmatrix/server/github-app.pem").Value(&a.GitHubKeyFile),
+			)), nil
+		default:
+			return nil, nil
 		}
 	}
 
-	groups = groups[:0]
+	rest := func() (*huh.Form, error) {
+		var groups []*huh.Group
 
-	if asked[stepAA] {
-		groups = append(groups, huh.NewGroup(
-			huh.NewNote().Title("Artificial Analysis").Description("Optional. Enables live model quality scores for the selector. Free tier at https://artificialanalysis.ai"),
-			huh.NewInput().Title("Artificial Analysis API key").EchoMode(huh.EchoModePassword).Value(&a.AAKey),
-		))
-	}
-
-	if asked[stepTaskSkills] {
-		groups = append(groups, huh.NewGroup(
-			huh.NewNote().Title("Task skills").Description("A git repo of task skills the agents read. Leave empty to use a local, empty directory."),
-			huh.NewInput().Title("Task-skills repo URL").Value(&a.TaskSkillsURL),
-		))
-	}
-
-	if asked[stepBoards] {
-		groups = append(groups, huh.NewGroup(
-			huh.NewNote().Title("Boards").Description("The git repo holding your cards. With a URL it is cloned and pushed to; without, a local repo is created."),
-			huh.NewInput().Title("Boards repo URL").Value(&a.BoardsURL),
-			huh.NewInput().Title("Boards name").Description("Directory name under ~/.contextmatrix/boards. Derived from the URL when empty.").Value(&a.BoardsName),
-		))
-	}
-
-	// Without a service manager there is nothing to ask: the start commands
-	// are printed instead. Linger is a systemd concept, so macOS is not asked.
-	a.Linger = a.Linger && info.OS == "linux"
-
-	if !asked[stepServices] {
-		a.Services, a.Linger = false, false
-	} else {
-		fields := []huh.Field{
-			huh.NewConfirm().Title("Install services?").Description("systemd user units on Linux, LaunchAgents on macOS. Started now and at login.").Value(&a.Services),
+		if asked[stepAA] {
+			groups = append(groups, huh.NewGroup(
+				huh.NewNote().Title("Artificial Analysis").Description("Optional. Enables live model quality scores for the selector. Free tier at https://artificialanalysis.ai"),
+				huh.NewInput().Title("Artificial Analysis API key").EchoMode(huh.EchoModePassword).Value(&a.AAKey),
+			))
 		}
 
-		if info.OS == "linux" {
-			fields = append(fields, huh.NewConfirm().Title("Enable linger?").
-				Description("Lets services run without an open login session. May prompt for a password.").
-				Value(&a.Linger))
+		if asked[stepTaskSkills] {
+			groups = append(groups, huh.NewGroup(
+				huh.NewNote().Title("Task skills").Description("A git repo of task skills the agents read. Leave empty to use a local, empty directory."),
+				huh.NewInput().Title("Task-skills repo URL").Value(&a.TaskSkillsURL),
+			))
 		}
 
-		groups = append(groups, huh.NewGroup(fields...))
-	}
-
-	rest := huh.NewForm(groups...)
-
-	if err := rest.Run(); err != nil {
-		return a, err
-	}
-
-	a.ServerPort, _ = strconv.Atoi(serverPort)
-	a.AgentPort, _ = strconv.Atoi(agentPort)
-	a.ChatPort, _ = strconv.Atoi(chatPort)
-	a.GitHubAppID, _ = strconv.ParseInt(appID, 10, 64)
-	a.GitHubInstallID, _ = strconv.ParseInt(installID, 10, 64)
-	a.Normalize()
-
-	if err := a.Validate(); err != nil {
-		return a, err
-	}
-
-	return Confirm(a)
-}
-
-// Confirm shows every answer with secrets masked and asks to proceed.
-func Confirm(a engine.Answers) (engine.Answers, error) {
-	mask := func(s string) string {
-		if s == "" {
-			return "(none)"
+		if asked[stepBoards] {
+			groups = append(groups, huh.NewGroup(
+				huh.NewNote().Title("Boards").Description("The git repo holding your cards. With a URL it is cloned and pushed to; without, a local repo is created."),
+				huh.NewInput().Title("Boards repo URL").Value(&a.BoardsURL),
+				huh.NewInput().Title("Boards name").Description("Directory name under ~/.contextmatrix/boards. Derived from the URL when empty.").Value(&a.BoardsName),
+			))
 		}
 
-		return "****"
-	}
+		// Without a service manager there is nothing to ask: the start
+		// commands are printed instead. Linger is a systemd concept, so
+		// macOS is not asked.
+		a.Linger = a.Linger && info.OS == "linux"
 
-	summary := fmt.Sprintf(
-		"login mode      %s\nports           server %d, agent %d, chat %d\nOpenRouter key  %s\ndefault model   %s\n"+
-			"GitHub          %s\nAA key          %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
-		a.AuthMode, a.ServerPort, a.AgentPort, a.ChatPort, mask(a.OpenRouterKey), a.DefaultModel,
-		a.GitHubMode, mask(a.AAKey), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
+		if !asked[stepServices] {
+			a.Services, a.Linger = false, false
+		} else {
+			fields := []huh.Field{
+				huh.NewConfirm().Title("Install services?").Description("systemd user units on Linux, LaunchAgents on macOS. Started now and at login.").Value(&a.Services),
+			}
+
+			if info.OS == "linux" {
+				fields = append(fields, huh.NewConfirm().Title("Enable linger?").
+					Description("Lets services run without an open login session. May prompt for a password.").
+					Value(&a.Linger))
+			}
+
+			groups = append(groups, huh.NewGroup(fields...))
+		}
+
+		if len(groups) == 0 {
+			return nil, nil
+		}
+
+		return huh.NewForm(groups...), nil
+	}
 
 	ok := true
 
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewNote().Title("Summary").Description(summary),
-		huh.NewConfirm().Title("Install with these settings?").Value(&ok),
-	))
-	if err := form.Run(); err != nil {
+	// The summary needs the final answers, so they are assembled and checked
+	// here rather than after the screen closes.
+	summary := func() (*huh.Form, error) {
+		a.ServerPort, _ = strconv.Atoi(serverPort)
+		a.AgentPort, _ = strconv.Atoi(agentPort)
+		a.ChatPort, _ = strconv.Atoi(chatPort)
+		a.GitHubAppID, _ = strconv.ParseInt(appID, 10, 64)
+		a.GitHubInstallID, _ = strconv.ParseInt(installID, 10, 64)
+		a.Normalize()
+
+		if err := a.Validate(); err != nil {
+			return nil, err
+		}
+
+		return huh.NewForm(huh.NewGroup(
+			huh.NewNote().Title("Summary").Description(Summary(a)),
+			huh.NewConfirm().Title("Install with these settings?").Value(&ok),
+		)), nil
+	}
+
+	steps := []step{func() (*huh.Form, error) { return first, nil }, credentials, rest, summary}
+
+	if err := runSteps(steps...); err != nil {
 		return a, err
 	}
 
@@ -311,6 +309,23 @@ func Confirm(a engine.Answers) (engine.Answers, error) {
 	}
 
 	return a, nil
+}
+
+// Summary lists every answer with secrets masked, one per line.
+func Summary(a engine.Answers) string {
+	mask := func(s string) string {
+		if s == "" {
+			return "(none)"
+		}
+
+		return "****"
+	}
+
+	return fmt.Sprintf(
+		"login mode      %s\nports           server %d, agent %d, chat %d\nOpenRouter key  %s\ndefault model   %s\n"+
+			"GitHub          %s\nAA key          %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
+		a.AuthMode, a.ServerPort, a.AgentPort, a.ChatPort, mask(a.OpenRouterKey), a.DefaultModel,
+		a.GitHubMode, mask(a.AAKey), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
 }
 
 func or(v, fallback string) string {

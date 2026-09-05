@@ -223,6 +223,11 @@ func finishInstall(cmd *cobra.Command, e *engine.Engine, a engine.Answers, known
 		if a, err = wizard.Run(a, known, e.Host, open); err != nil {
 			return err
 		}
+
+		// The wizard ran on the alternate screen, so the choices are printed
+		// once more where the install log that follows can be read with them.
+		fmt.Fprintln(cmd.OutOrStdout(), wizard.Summary(a))
+		fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	return e.Install(ctx, a)
