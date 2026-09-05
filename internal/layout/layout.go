@@ -141,8 +141,9 @@ func (l Layout) RuntimeDirs() []string {
 	}
 }
 
-// Tilde shortens a path under Home to the ~ form used in config values and
-// output; the apps expand ~ themselves.
+// Tilde shortens a path under Home to the ~ form for output only. Config
+// values are written absolute: the agent and chat expand no ~ at all, and
+// the server expands it only for some keys.
 func Tilde(l Layout, p string) string {
 	if p == l.Home {
 		return "~"

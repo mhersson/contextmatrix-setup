@@ -60,24 +60,24 @@ func TestBuildRewritesPathsAndListsMoves(t *testing.T) {
 	v, _ := configsync.Get(p.Server, "instance.id")
 	assert.Equal(t, "box-abc123", v)
 	v, _ = configsync.Get(p.Server, "auth.db_path")
-	assert.Equal(t, "~/.contextmatrix/server/auth.db", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/server/auth.db", v)
 	v, _ = configsync.Get(p.Server, "auth.master_key_file")
-	assert.Equal(t, "~/.contextmatrix/server/master.key", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/server/master.key", v)
 	v, _ = configsync.Get(p.Server, "workflow_skills_dir")
-	assert.Equal(t, "~/.contextmatrix/workflow-skills", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/workflow-skills", v)
 	v, _ = configsync.Get(p.Server, "github.pat.token")
 	assert.Equal(t, "T", v, "every other key carries over")
 	v, _ = configsync.Get(p.Server, "boards.dir")
 	assert.Equal(t, "~/contextmatrix-boards", v, "repos stay put by default")
 
 	v, _ = configsync.Get(p.Agent, "secrets_dir")
-	assert.Equal(t, "~/.contextmatrix/agent/secrets", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/agent/secrets", v)
 	v, _ = configsync.Get(p.Agent, "log_dir")
-	assert.Equal(t, "~/.contextmatrix/agent/logs", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/agent/logs", v)
 	v, _ = configsync.Get(p.Chat, "secrets_dir")
-	assert.Equal(t, "~/.contextmatrix/chat/secrets", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/chat/secrets", v)
 	v, _ = configsync.Get(p.Chat, "chat_run_dir")
-	assert.Equal(t, "~/.contextmatrix/chat/sessions", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/chat/sessions", v)
 
 	assert.Equal(t, []RepoDir{{Key: "boards", Path: "~/contextmatrix-boards"}, {Key: "task_skills", Path: "~/skills"}}, p.RepoDirs)
 
@@ -110,9 +110,9 @@ func TestBuildMovesReposWhenAsked(t *testing.T) {
 	require.NoError(t, err)
 
 	v, _ := configsync.Get(p.Server, "boards.dir")
-	assert.Equal(t, "~/.contextmatrix/boards/contextmatrix-boards", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/boards/contextmatrix-boards", v)
 	v, _ = configsync.Get(p.Server, "task_skills.dir")
-	assert.Equal(t, "~/.contextmatrix/task-skills", v)
+	assert.Equal(t, l.Home+"/.contextmatrix/task-skills", v)
 
 	to := map[string]string{}
 	for _, m := range p.Moves {
@@ -133,7 +133,7 @@ func TestBuildHandlesBoardsList(t *testing.T) {
 
 	list := p.Server["boards"].([]any)
 	assert.Equal(t, "~/a", list[0].(map[string]any)["dir"])
-	assert.Equal(t, "~/.contextmatrix/boards/b", list[1].(map[string]any)["dir"])
+	assert.Equal(t, l.Home+"/.contextmatrix/boards/b", list[1].(map[string]any)["dir"])
 }
 
 func TestBuildFlagsAConfigWithNoOldFile(t *testing.T) {

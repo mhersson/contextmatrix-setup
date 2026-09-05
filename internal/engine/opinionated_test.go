@@ -47,15 +47,15 @@ func TestOpinionatedServer(t *testing.T) {
 
 	assert.Equal(t, 18080, get(t, s, "port"))
 	assert.Equal(t, "box-abc123", get(t, s, "instance.id"))
-	assert.Equal(t, "~/.contextmatrix/workflow-skills", get(t, s, "workflow_skills_dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/workflow-skills", get(t, s, "workflow_skills_dir"))
 	assert.Equal(t, "mcp", get(t, s, "mcp_api_key"))
 	assert.Equal(t, "openrouter", get(t, s, "llm_endpoint.type"))
 	assert.Equal(t, "or-key", get(t, s, "llm_endpoint.api_key"))
-	assert.Equal(t, "~/.contextmatrix/boards/team", get(t, s, "boards.dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/boards/team", get(t, s, "boards.dir"))
 	assert.Equal(t, "https://github.com/org/team.git", get(t, s, "boards.git_remote_url"))
 	assert.Equal(t, true, get(t, s, "boards.git_clone_on_empty"))
 	assert.Equal(t, true, get(t, s, "boards.git_auto_push"))
-	assert.Equal(t, "~/.contextmatrix/task-skills", get(t, s, "task_skills.dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/task-skills", get(t, s, "task_skills.dir"))
 	assert.Equal(t, true, get(t, s, "task_skills.git_clone_on_empty"))
 	assert.Equal(t, "http://localhost:19092", get(t, s, "backends.agent.url"))
 	assert.Equal(t, "agentkey", get(t, s, "backends.agent.api_key"))
@@ -66,10 +66,10 @@ func TestOpinionatedServer(t *testing.T) {
 	assert.Equal(t, "chatkey", get(t, s, "backends.chat.api_key"))
 	assert.Equal(t, DefaultModel, get(t, s, "backends.chat.default_model"))
 	assert.Equal(t, "none", get(t, s, "auth.mode"))
-	assert.Equal(t, "~/.contextmatrix/server/master.key", get(t, s, "auth.master_key_file"))
-	assert.Equal(t, "~/.contextmatrix/server/auth.db", get(t, s, "auth.db_path"))
-	assert.Equal(t, "~/.contextmatrix/server/images.db", get(t, s, "images.db_path"))
-	assert.Equal(t, "~/.contextmatrix/server/ops.db", get(t, s, "op_store.db_path"))
+	assert.Equal(t, "/home/u/.contextmatrix/server/master.key", get(t, s, "auth.master_key_file"))
+	assert.Equal(t, "/home/u/.contextmatrix/server/auth.db", get(t, s, "auth.db_path"))
+	assert.Equal(t, "/home/u/.contextmatrix/server/images.db", get(t, s, "images.db_path"))
+	assert.Equal(t, "/home/u/.contextmatrix/server/ops.db", get(t, s, "op_store.db_path"))
 	assert.Equal(t, "pat", get(t, s, "github.auth_mode"))
 	assert.Equal(t, "ghp_x", get(t, s, "github.pat.token"))
 }
@@ -83,12 +83,12 @@ func TestOpinionatedServerSkipsAndNoDocker(t *testing.T) {
 
 	tr := Opinionated(a, f)
 
-	assert.Equal(t, "~/.contextmatrix/boards/boards", get(t, tr.Server, "boards.dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/boards/boards", get(t, tr.Server, "boards.dir"))
 	_, has := configsync.Get(tr.Server, "boards.git_remote_url")
 	assert.False(t, has, "no remote written without a URL")
 	_, has = configsync.Get(tr.Server, "boards.git_auto_push")
 	assert.False(t, has)
-	assert.Equal(t, "~/.contextmatrix/task-skills", get(t, tr.Server, "task_skills.dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/task-skills", get(t, tr.Server, "task_skills.dir"))
 	_, has = configsync.Get(tr.Server, "task_skills.git_remote_url")
 	assert.False(t, has)
 	assert.Equal(t, false, get(t, tr.Server, "backends.agent.enabled"))
@@ -112,7 +112,7 @@ func TestOpinionatedGitHubApp(t *testing.T) {
 	assert.Equal(t, "app", get(t, s, "github.auth_mode"))
 	assert.Equal(t, int64(12), get(t, s, "github.app.app_id"))
 	assert.Equal(t, int64(34), get(t, s, "github.app.installation_id"))
-	assert.Equal(t, "~/.contextmatrix/server/github-app.pem", get(t, s, "github.app.private_key_path"))
+	assert.Equal(t, "/home/u/.contextmatrix/server/github-app.pem", get(t, s, "github.app.private_key_path"))
 }
 
 func TestOpinionatedBackends(t *testing.T) {
@@ -124,8 +124,8 @@ func TestOpinionatedBackends(t *testing.T) {
 	assert.Equal(t, "mcp", get(t, tr.Agent, "mcp_api_key"))
 	assert.Equal(t, 19092, get(t, tr.Agent, "port"))
 	assert.Equal(t, "contextmatrix-agent-worker:abc1234", get(t, tr.Agent, "base_image"))
-	assert.Equal(t, "~/.contextmatrix/agent/secrets", get(t, tr.Agent, "secrets_dir"))
-	assert.Equal(t, "~/.contextmatrix/agent/logs", get(t, tr.Agent, "log_dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/agent/secrets", get(t, tr.Agent, "secrets_dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/agent/logs", get(t, tr.Agent, "log_dir"))
 	assert.Equal(t, DefaultModel, get(t, tr.Agent, "default_model"))
 	_, has := configsync.Get(tr.Agent, "image_pull_policy")
 	assert.False(t, has, "pull policy is never written")
@@ -135,8 +135,8 @@ func TestOpinionatedBackends(t *testing.T) {
 	assert.Equal(t, "chatkey", get(t, tr.Chat, "api_key"))
 	assert.Equal(t, 19093, get(t, tr.Chat, "port"))
 	assert.Equal(t, "contextmatrix-chat-worker:def5678", get(t, tr.Chat, "base_image"))
-	assert.Equal(t, "~/.contextmatrix/chat/secrets", get(t, tr.Chat, "secrets_dir"))
-	assert.Equal(t, "~/.contextmatrix/chat/sessions", get(t, tr.Chat, "chat_run_dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/chat/secrets", get(t, tr.Chat, "secrets_dir"))
+	assert.Equal(t, "/home/u/.contextmatrix/chat/sessions", get(t, tr.Chat, "chat_run_dir"))
 }
 
 func TestForcedAnswersSwitchesGitHubBlock(t *testing.T) {
@@ -157,7 +157,7 @@ func TestForcedAnswersSwitchesGitHubBlock(t *testing.T) {
 	assert.Equal(t, "app", server["github.auth_mode"])
 	assert.Equal(t, int64(7), server["github.app.app_id"])
 	assert.Equal(t, int64(8), server["github.app.installation_id"])
-	assert.Equal(t, "~/.contextmatrix/server/github-app.pem", server["github.app.private_key_path"])
+	assert.Equal(t, "/home/u/.contextmatrix/server/github-app.pem", server["github.app.private_key_path"])
 	assert.Empty(t, server["github.pat.token"], "the server rejects a populated other block")
 	assert.Empty(t, force[repos.Agent])
 	assert.Empty(t, force[repos.Chat])
@@ -211,11 +211,11 @@ func TestForcedAnswersFollowsEachChangedField(t *testing.T) {
 		"llm_endpoint.type":              "openrouter",
 		"llm_endpoint.api_key":           "or",
 		"backends.agent.aa_api_key":      "aa",
-		"boards.dir":                     "~/.contextmatrix/boards/team",
+		"boards.dir":                     "/home/u/.contextmatrix/boards/team",
 		"boards.git_remote_url":          "https://github.com/org/team.git",
 		"boards.git_clone_on_empty":      true,
 		"boards.git_auto_push":           true,
-		"task_skills.dir":                "~/.contextmatrix/task-skills",
+		"task_skills.dir":                "/home/u/.contextmatrix/task-skills",
 		"task_skills.git_remote_url":     "https://github.com/org/skills.git",
 		"task_skills.git_clone_on_empty": true,
 	}, force[repos.Server])

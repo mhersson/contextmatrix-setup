@@ -80,7 +80,9 @@ the cause is fixed and `contextmatrix-setup update` is run.
 
 The installer manages the key set; you own the values. Each file starts with a
 header saying so and naming the upstream example file that documents every key.
-Comments are not preserved, so keep notes elsewhere.
+Comments are not preserved, so keep notes elsewhere. Paths are
+written absolute: the agent and chat do not expand `~`, and the server does so
+only for some keys.
 
 The schema comes from each app's own `config defaults` command, so a fresh
 upstream key appears at the next update and a removed one is dropped and listed

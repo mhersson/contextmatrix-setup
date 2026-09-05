@@ -166,7 +166,7 @@ func TestMigrateFromOldLayout(t *testing.T) {
 	assert.Contains(t, server, "port: 8080")
 	assert.Contains(t, server, "mcp_api_key: OLDMCP")
 	assert.Contains(t, server, "id: oldbox-123456")
-	assert.Contains(t, server, "dir: ~/.contextmatrix/boards/contextmatrix-boards")
+	assert.Contains(t, server, "dir: "+e.home+"/.contextmatrix/boards/contextmatrix-boards")
 	assert.Contains(t, e.read(".config/contextmatrix/agent.yaml"), "api_key: OLDAGENTOLDAGENTOLDAGENTOLDAGENT")
 	assert.Contains(t, e.read(".contextmatrix/setup/state.yaml"), "migration:")
 }

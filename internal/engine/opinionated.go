@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
@@ -29,19 +30,18 @@ type Trees struct {
 // base_image, which the update flow sets explicitly after each build.
 func Opinionated(a Answers, f Facts) Trees {
 	l := f.Layout
-	tilde := func(p string) string { return layout.Tilde(l, p) }
 	serverURL := fmt.Sprintf("http://localhost:%d", a.ServerPort)
 	containerURL := fmt.Sprintf("http://%s:%d", f.Gateway, a.ServerPort)
 
 	s := configsync.Tree{}
 	configsync.Set(s, "port", a.ServerPort)
 	configsync.Set(s, "instance.id", f.InstanceID)
-	configsync.Set(s, "workflow_skills_dir", tilde(l.WorkflowSkillsDir()))
+	configsync.Set(s, "workflow_skills_dir", l.WorkflowSkillsDir())
 	configsync.Set(s, "mcp_api_key", f.Keys.MCP)
 	configsync.Set(s, "llm_endpoint.type", "openrouter")
 	configsync.Set(s, "llm_endpoint.api_key", a.OpenRouterKey)
 
-	configsync.Set(s, "boards.dir", tilde(l.BoardsDir(a.BoardsName)))
+	configsync.Set(s, "boards.dir", l.BoardsDir(a.BoardsName))
 
 	if a.BoardsURL != "" {
 		configsync.Set(s, "boards.git_remote_url", a.BoardsURL)
@@ -49,7 +49,7 @@ func Opinionated(a Answers, f Facts) Trees {
 		configsync.Set(s, "boards.git_auto_push", true)
 	}
 
-	configsync.Set(s, "task_skills.dir", tilde(l.TaskSkillsDir()))
+	configsync.Set(s, "task_skills.dir", l.TaskSkillsDir())
 
 	if a.TaskSkillsURL != "" {
 		configsync.Set(s, "task_skills.git_remote_url", a.TaskSkillsURL)
@@ -67,10 +67,10 @@ func Opinionated(a Answers, f Facts) Trees {
 	configsync.Set(s, "backends.chat.default_model", a.DefaultModel)
 
 	configsync.Set(s, "auth.mode", a.AuthMode)
-	configsync.Set(s, "auth.master_key_file", tilde(l.ServerStateDir()+"/master.key"))
-	configsync.Set(s, "auth.db_path", tilde(l.ServerStateDir()+"/auth.db"))
-	configsync.Set(s, "images.db_path", tilde(l.ServerStateDir()+"/images.db"))
-	configsync.Set(s, "op_store.db_path", tilde(l.ServerStateDir()+"/ops.db"))
+	configsync.Set(s, "auth.master_key_file", filepath.Join(l.ServerStateDir(), "master.key"))
+	configsync.Set(s, "auth.db_path", filepath.Join(l.ServerStateDir(), "auth.db"))
+	configsync.Set(s, "images.db_path", filepath.Join(l.ServerStateDir(), "images.db"))
+	configsync.Set(s, "op_store.db_path", filepath.Join(l.ServerStateDir(), "ops.db"))
 
 	switch a.GitHubMode {
 	case "pat":
@@ -80,7 +80,7 @@ func Opinionated(a Answers, f Facts) Trees {
 		configsync.Set(s, "github.auth_mode", "app")
 		configsync.Set(s, "github.app.app_id", a.GitHubAppID)
 		configsync.Set(s, "github.app.installation_id", a.GitHubInstallID)
-		configsync.Set(s, "github.app.private_key_path", tilde(f.GitHubKey))
+		configsync.Set(s, "github.app.private_key_path", f.GitHubKey)
 	}
 
 	ag := configsync.Tree{}
@@ -89,8 +89,8 @@ func Opinionated(a Answers, f Facts) Trees {
 	configsync.Set(ag, "api_key", f.Keys.Agent)
 	configsync.Set(ag, "mcp_api_key", f.Keys.MCP)
 	configsync.Set(ag, "port", a.AgentPort)
-	configsync.Set(ag, "secrets_dir", tilde(l.AgentSecretsDir()))
-	configsync.Set(ag, "log_dir", tilde(l.AgentLogsDir()))
+	configsync.Set(ag, "secrets_dir", l.AgentSecretsDir())
+	configsync.Set(ag, "log_dir", l.AgentLogsDir())
 	configsync.Set(ag, "default_model", a.DefaultModel)
 
 	if f.AgentImage != "" {
@@ -102,8 +102,8 @@ func Opinionated(a Answers, f Facts) Trees {
 	configsync.Set(ch, "container_contextmatrix_url", containerURL)
 	configsync.Set(ch, "api_key", f.Keys.Chat)
 	configsync.Set(ch, "port", a.ChatPort)
-	configsync.Set(ch, "secrets_dir", tilde(l.ChatSecretsDir()))
-	configsync.Set(ch, "chat_run_dir", tilde(l.ChatSessionsDir()))
+	configsync.Set(ch, "secrets_dir", l.ChatSecretsDir())
+	configsync.Set(ch, "chat_run_dir", l.ChatSessionsDir())
 
 	if f.ChatImage != "" {
 		configsync.Set(ch, "base_image", f.ChatImage)

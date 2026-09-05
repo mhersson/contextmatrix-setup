@@ -123,7 +123,6 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 		return p, err
 	}
 
-	tilde := func(s string) string { return layout.Tilde(l, s) }
 	expand := func(s string) string {
 		if strings.HasPrefix(s, "~/") {
 			return filepath.Join(l.Home, s[2:])
@@ -159,7 +158,7 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 		}
 
 		to := filepath.Join(l.ServerStateDir(), name)
-		configsync.Set(p.Server, key, tilde(to))
+		configsync.Set(p.Server, key, to)
 
 		if exists(from) && from != to {
 			p.Moves = append(p.Moves, Move{From: from, To: to})
@@ -186,7 +185,7 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 		}
 	}
 
-	configsync.Set(p.Server, "workflow_skills_dir", tilde(l.WorkflowSkillsDir()))
+	configsync.Set(p.Server, "workflow_skills_dir", l.WorkflowSkillsDir())
 
 	if f.WorkflowSkills != "" {
 		p.Moves = append(p.Moves, Move{From: f.WorkflowSkills, To: l.WorkflowSkillsDir()})
@@ -210,7 +209,7 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 
 			if moveRepos[key] {
 				to := l.BoardsDir(filepath.Base(expand(dir)))
-				entry["dir"] = tilde(to)
+				entry["dir"] = to
 				p.Moves = append(p.Moves, Move{From: expand(dir), To: to})
 			}
 		}
@@ -220,7 +219,7 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 
 			if moveRepos["boards"] {
 				to := l.BoardsDir(filepath.Base(expand(dir)))
-				configsync.Set(p.Server, "boards.dir", tilde(to))
+				configsync.Set(p.Server, "boards.dir", to)
 				p.Moves = append(p.Moves, Move{From: expand(dir), To: to})
 			}
 		}
@@ -231,17 +230,17 @@ func Build(l layout.Layout, f Found, moveRepos map[string]bool) (Plan, error) {
 			p.RepoDirs = append(p.RepoDirs, RepoDir{Key: "task_skills", Path: dir})
 
 			if moveRepos["task_skills"] {
-				configsync.Set(p.Server, "task_skills.dir", tilde(l.TaskSkillsDir()))
+				configsync.Set(p.Server, "task_skills.dir", l.TaskSkillsDir())
 				p.Moves = append(p.Moves, Move{From: expand(dir), To: l.TaskSkillsDir()})
 			}
 		}
 	}
 
 	// Backend runtime dirs are repointed only; their content is per-run.
-	configsync.Set(p.Agent, "secrets_dir", tilde(l.AgentSecretsDir()))
-	configsync.Set(p.Agent, "log_dir", tilde(l.AgentLogsDir()))
-	configsync.Set(p.Chat, "secrets_dir", tilde(l.ChatSecretsDir()))
-	configsync.Set(p.Chat, "chat_run_dir", tilde(l.ChatSessionsDir()))
+	configsync.Set(p.Agent, "secrets_dir", l.AgentSecretsDir())
+	configsync.Set(p.Agent, "log_dir", l.AgentLogsDir())
+	configsync.Set(p.Chat, "secrets_dir", l.ChatSecretsDir())
+	configsync.Set(p.Chat, "chat_run_dir", l.ChatSessionsDir())
 
 	return p, nil
 }
