@@ -60,10 +60,53 @@ func AskMoveRepos(dirs []migrate.RepoDir) (map[string]bool, error) {
 	return out, nil
 }
 
-// Run asks for every answer, prefilled with in. open receives the GitHub
-// new-token page when the PAT mode is chosen; a nil open just skips that.
-func Run(in engine.Answers, info host.Info, open func(url string) error) (engine.Answers, error) {
+// Step names in the order Run asks them.
+const (
+	stepLogin      = "login"
+	stepPorts      = "ports"
+	stepInference  = "inference"
+	stepGitHub     = "github"
+	stepAA         = "aa"
+	stepTaskSkills = "task-skills"
+	stepBoards     = "boards"
+	stepServices   = "services"
+)
+
+// Steps lists what Run asks: every step on a fresh install, only what the
+// carried config lacks after a migration. Services are never asked without
+// a manager to run them.
+func Steps(known engine.Known, info host.Info) []string {
+	var out []string
+
+	add := func(step string, skip bool) {
+		if !skip {
+			out = append(out, step)
+		}
+	}
+
+	add(stepLogin, known.AuthMode)
+	add(stepPorts, known.Ports)
+	add(stepInference, known.OpenRouterKey && known.DefaultModel)
+	add(stepGitHub, known.GitHub)
+	add(stepAA, known.AAKey)
+	add(stepTaskSkills, known.TaskSkills)
+	add(stepBoards, known.Boards)
+	add(stepServices, info.ServiceManager == "none")
+
+	return out
+}
+
+// Run asks for the answers Steps lists, prefilled with in. open receives the
+// GitHub new-token page when the PAT mode is chosen; a nil open just skips
+// that.
+func Run(in engine.Answers, known engine.Known, info host.Info, open func(url string) error) (engine.Answers, error) {
 	a := in
+	asked := map[string]bool{}
+
+	for _, step := range Steps(known, info) {
+		asked[step] = true
+	}
+
 	serverPort, agentPort, chatPort := strconv.Itoa(a.ServerPort), strconv.Itoa(a.AgentPort), strconv.Itoa(a.ChatPort)
 	appID, installID := strconv.FormatInt(a.GitHubAppID, 10), strconv.FormatInt(a.GitHubInstallID, 10)
 	prereqs := prerequisites(info)
@@ -81,30 +124,53 @@ func Run(in engine.Answers, info host.Info, open func(url string) error) (engine
 		return nil
 	}
 
-	first := huh.NewForm(
-		huh.NewGroup(
-			huh.NewNote().Title("ContextMatrix setup").Description(welcome+"\n\n"+prereqs),
-		),
-		huh.NewGroup(
+	intro := welcome + "\n\n" + prereqs
+	if len(asked) < len(Steps(engine.Known{}, info)) {
+		intro += "\n\nValues found in your existing install are carried over and not asked again; the summary at the end lists them."
+	}
+
+	groups := []*huh.Group{
+		huh.NewGroup(huh.NewNote().Title("ContextMatrix setup").Description(intro)),
+	}
+
+	if asked[stepLogin] {
+		groups = append(groups, huh.NewGroup(
 			huh.NewSelect[string]().Title("Login mode").
 				Description("multi: login required; the first admin is created through a one-time link opened after start.\n"+
 					"none: single user, no login. For a laptop.\n"+
 					"Either way the server listens on all interfaces, so it is reachable from your network.").
 				Options(huh.NewOption("multi (login)", "multi"), huh.NewOption("none (single user)", "none")).
 				Value(&a.AuthMode),
-		),
-		huh.NewGroup(
+		))
+	}
+
+	if asked[stepPorts] {
+		groups = append(groups, huh.NewGroup(
 			huh.NewNote().Title("Ports").Description("High ports so nothing collides with the usual 8080 and 9090 crowd."),
 			huh.NewInput().Title("Server port").Value(&serverPort).Validate(port),
 			huh.NewInput().Title("Agent port").Value(&agentPort).Validate(port),
 			huh.NewInput().Title("Chat port").Value(&chatPort).Validate(port),
-		),
-		huh.NewGroup(
+		))
+	}
+
+	if asked[stepInference] {
+		fields := []huh.Field{
 			huh.NewNote().Title("Inference").Description("Runs and chats need an OpenRouter API key; it is forwarded to every worker. Leave empty to add it to server.yaml later."),
-			huh.NewInput().Title("OpenRouter API key").EchoMode(huh.EchoModePassword).Value(&a.OpenRouterKey),
-			huh.NewInput().Title("Default model").Description("Used by both backends; chat cannot start without one.").Value(&a.DefaultModel),
-		),
-		huh.NewGroup(
+		}
+
+		if !known.OpenRouterKey {
+			fields = append(fields, huh.NewInput().Title("OpenRouter API key").EchoMode(huh.EchoModePassword).Value(&a.OpenRouterKey))
+		}
+
+		if !known.DefaultModel {
+			fields = append(fields, huh.NewInput().Title("Default model").Description("Used by both backends; chat cannot start without one.").Value(&a.DefaultModel))
+		}
+
+		groups = append(groups, huh.NewGroup(fields...))
+	}
+
+	if asked[stepGitHub] {
+		groups = append(groups, huh.NewGroup(
 			huh.NewNote().Title("GitHub").Description(
 				"pat: a personal access token; quickest, acts as you.\n"+
 					"app: a GitHub App; installs per org, scoped permissions, better for teams.\n"+
@@ -112,8 +178,10 @@ func Run(in engine.Answers, info host.Info, open func(url string) error) (engine
 			huh.NewSelect[string]().Title("GitHub auth").
 				Options(huh.NewOption("pat", "pat"), huh.NewOption("app", "app"), huh.NewOption("skip", "skip")).
 				Value(&a.GitHubMode),
-		),
-	)
+		))
+	}
+
+	first := huh.NewForm(groups...)
 
 	if err := first.Run(); err != nil {
 		return a, err
@@ -121,8 +189,9 @@ func Run(in engine.Answers, info host.Info, open func(url string) error) (engine
 
 	// The GitHub credentials asked for depend on the mode just chosen, so they
 	// run as their own form rather than as hidden groups of the first one.
-	switch a.GitHubMode {
-	case "pat":
+	switch mode := a.GitHubMode; {
+	case !asked[stepGitHub]:
+	case mode == "pat":
 		if open != nil {
 			// The note prints the URL as well, so a browser that will not
 			// open is nothing to report.
@@ -136,7 +205,7 @@ func Run(in engine.Answers, info host.Info, open func(url string) error) (engine
 		if err := pat.Run(); err != nil {
 			return a, err
 		}
-	case "app":
+	case mode == "app":
 		app := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("App id").Value(&appID),
 			huh.NewInput().Title("Installation id").Value(&installID),
@@ -147,27 +216,35 @@ func Run(in engine.Answers, info host.Info, open func(url string) error) (engine
 		}
 	}
 
-	groups := []*huh.Group{
-		huh.NewGroup(
+	groups = groups[:0]
+
+	if asked[stepAA] {
+		groups = append(groups, huh.NewGroup(
 			huh.NewNote().Title("Artificial Analysis").Description("Optional. Enables live model quality scores for the selector. Free tier at https://artificialanalysis.ai"),
 			huh.NewInput().Title("Artificial Analysis API key").EchoMode(huh.EchoModePassword).Value(&a.AAKey),
-		),
-		huh.NewGroup(
+		))
+	}
+
+	if asked[stepTaskSkills] {
+		groups = append(groups, huh.NewGroup(
 			huh.NewNote().Title("Task skills").Description("A git repo of task skills the agents read. Leave empty to use a local, empty directory."),
 			huh.NewInput().Title("Task-skills repo URL").Value(&a.TaskSkillsURL),
-		),
-		huh.NewGroup(
+		))
+	}
+
+	if asked[stepBoards] {
+		groups = append(groups, huh.NewGroup(
 			huh.NewNote().Title("Boards").Description("The git repo holding your cards. With a URL it is cloned and pushed to; without, a local repo is created."),
 			huh.NewInput().Title("Boards repo URL").Value(&a.BoardsURL),
 			huh.NewInput().Title("Boards name").Description("Directory name under ~/.contextmatrix/boards. Derived from the URL when empty.").Value(&a.BoardsName),
-		),
+		))
 	}
 
 	// Without a service manager there is nothing to ask: the start commands
 	// are printed instead. Linger is a systemd concept, so macOS is not asked.
 	a.Linger = a.Linger && info.OS == "linux"
 
-	if info.ServiceManager == "none" {
+	if !asked[stepServices] {
 		a.Services, a.Linger = false, false
 	} else {
 		fields := []huh.Field{

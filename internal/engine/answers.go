@@ -30,6 +30,19 @@ type Answers struct {
 	Linger          bool
 }
 
+// Known records which answers a config tree actually held. A wizard run
+// after a migration asks only for what the old install never had.
+type Known struct {
+	AuthMode      bool
+	Ports         bool
+	OpenRouterKey bool
+	DefaultModel  bool
+	GitHub        bool
+	AAKey         bool
+	TaskSkills    bool
+	Boards        bool
+}
+
 func DefaultAnswers() Answers {
 	return Answers{
 		AuthMode:     "multi",
@@ -96,11 +109,11 @@ func (a Answers) Validate() error {
 	switch a.GitHubMode {
 	case "skip":
 	case "pat":
-		if a.GitHubPAT == "" {
+		if !a.githubComplete() {
 			return errors.New("github pat mode needs a token")
 		}
 	case "app":
-		if a.GitHubAppID == 0 || a.GitHubInstallID == 0 || a.GitHubKeyFile == "" {
+		if !a.githubComplete() {
 			return errors.New("github app mode needs app id, installation id and a private key file")
 		}
 	default:
@@ -116,4 +129,17 @@ func (a Answers) Validate() error {
 
 func (a Answers) GitHubConfigured() bool {
 	return a.GitHubMode == "pat" || a.GitHubMode == "app"
+}
+
+// githubComplete reports whether the chosen mode has every credential it
+// needs.
+func (a Answers) githubComplete() bool {
+	switch a.GitHubMode {
+	case "pat":
+		return a.GitHubPAT != ""
+	case "app":
+		return a.GitHubAppID != 0 && a.GitHubInstallID != 0 && a.GitHubKeyFile != ""
+	default:
+		return false
+	}
 }

@@ -372,3 +372,20 @@ func TestInstallWithoutServicesRecordsNone(t *testing.T) {
 	assert.Equal(t, "none", st.ServiceManager)
 	assert.Contains(t, h.out.String(), "start by hand")
 }
+
+func TestInstallExpandsTildeInGitHubKeyFile(t *testing.T) {
+	h := newHarness(t, true)
+	require.NoError(t, os.WriteFile(filepath.Join(h.e.L.Home, "app.pem"), []byte("PEM"), 0o600))
+
+	a := DefaultAnswers()
+	a.GitHubMode = "app"
+	a.GitHubAppID = 1
+	a.GitHubInstallID = 2
+	a.GitHubKeyFile = "~/app.pem"
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	data, err := os.ReadFile(filepath.Join(h.e.L.ServerStateDir(), "github-app.pem"))
+	require.NoError(t, err)
+	assert.Equal(t, "PEM", string(data), "a carried ~ path is read from the home directory")
+}

@@ -51,7 +51,10 @@ only what changed. `--yes` skips the confirmation.
 | `uninstall` | Remove services only; configs, state and binaries stay                                  |
 
 `migrate` moves the old config and state files to their new locations and keeps
-every value; boards and task-skills checkouts move only when asked. Shipped
+every value: keys, GitHub credentials, ports, model and repositories found in
+the old config are carried over, and the wizard asks only for what the old
+install never had. Boards and task-skills checkouts move only when asked
+(`--move-repos` with `--yes`). Shipped
 workflow skills under `~/.contextmatrix/workflow-skills` are refreshed from
 upstream at the install that follows migration, so save a customised copy of a
 shipped skill under its own name before migrating. Files that do not exist

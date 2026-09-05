@@ -170,3 +170,36 @@ func TestMigrateFromOldLayout(t *testing.T) {
 	assert.Contains(t, e.read(".config/contextmatrix/agent.yaml"), "api_key: OLDAGENTOLDAGENTOLDAGENTOLDAGENT")
 	assert.Contains(t, e.read(".contextmatrix/setup/state.yaml"), "migration:")
 }
+
+func TestMigrateCommandCarriesValuesWithoutAsking(t *testing.T) {
+	e := newEnv(t)
+
+	write := func(rel, content string) {
+		p := filepath.Join(e.home, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
+	}
+
+	write(".config/contextmatrix/config.yaml", "port: 8080\nmcp_api_key: OLDMCP\nllm_endpoint:\n  api_key: OR\ngithub:\n  auth_mode: pat\n  pat:\n    token: T\nboards:\n  dir: ~/contextmatrix-boards\n  git_remote_url: https://example.test/contextmatrix-boards.git\ntask_skills:\n  dir: ~/skills\n  git_remote_url: https://example.test/skills.git\n")
+	write(".config/contextmatrix-agent/serve.yaml", "port: 9092\napi_key: OLDAGENTOLDAGENTOLDAGENTOLDAGENT\n")
+	write(".config/contextmatrix-chat/serve.yaml", "port: 9093\napi_key: OLDCHATOLDCHATOLDCHATOLDCHATOLDCH\n")
+	write(".local/state/contextmatrix/master.key", "K")
+	write("contextmatrix-boards/.git/HEAD", "ref: refs/heads/main\n")
+	write("skills/.git/HEAD", "ref: refs/heads/main\n")
+
+	out, err := e.run("migrate", "--yes")
+	require.NoError(t, err, out)
+
+	// The old values win over the installer's defaults: nothing is asked and
+	// nothing is forced.
+	server := e.read(".config/contextmatrix/server.yaml")
+	assert.Contains(t, server, "port: 8080")
+	assert.Contains(t, server, "api_key: OR")
+	assert.Contains(t, server, "token: T")
+	assert.Contains(t, server, "dir: ~/contextmatrix-boards")
+	assert.Contains(t, server, "git_remote_url: https://example.test/contextmatrix-boards.git")
+	assert.Contains(t, server, "dir: ~/skills")
+	assert.Contains(t, server, "git_remote_url: https://example.test/skills.git")
+	assert.Contains(t, e.read(".config/contextmatrix/agent.yaml"), "port: 9092")
+	assert.Contains(t, e.read(".config/contextmatrix/agent.yaml"), "contextmatrix_url: http://localhost:8080")
+}

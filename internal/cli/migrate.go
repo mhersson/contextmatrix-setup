@@ -6,17 +6,24 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mhersson/contextmatrix-setup/internal/migrate"
-	"github.com/mhersson/contextmatrix-setup/internal/wizard"
 )
 
 func newMigrateCmd() *cobra.Command {
-	return &cobra.Command{
+	var yes, moveRepos bool
+
+	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Move an existing default-layout install under ~/.contextmatrix, then install",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			e, err := newEngine(cmd.Context(), cmd.OutOrStdout())
+			ctx := cmd.Context()
+
+			e, err := newEngine(ctx, cmd.OutOrStdout())
 			if err != nil {
+				return err
+			}
+
+			if err := requireTools(e); err != nil {
 				return err
 			}
 
@@ -25,36 +32,27 @@ func newMigrateCmd() *cobra.Command {
 				return errors.New("no default-layout install found")
 			}
 
-			plan, err := migrate.Build(e.L, found, nil)
+			a, known, err := migrateInstall(ctx, e, found, yes, moveRepos)
 			if err != nil {
 				return err
 			}
 
-			moves, err := wizard.AskMoveRepos(plan.RepoDirs)
+			installed, err := isInstalled(e)
 			if err != nil {
 				return err
 			}
 
-			if plan, err = migrate.Build(e.L, found, moves); err != nil {
-				return err
+			if installed {
+				return updateInstead(cmd, e, yes)
 			}
 
-			if err := e.Migrate(cmd.Context(), plan); err != nil {
-				return err
-			}
-
-			return chainedInstall().ExecuteContext(cmd.Context())
+			return finishInstall(cmd, e, a, known, yes)
 		},
 	}
-}
 
-// chainedInstall prepares the install command for a run inside another
-// command. Without an explicit empty argument list cobra falls back to
-// os.Args[1:], which still says "migrate", and install rejects it.
-func chainedInstall() *cobra.Command {
-	sub := newInstallCmd()
-	sub.SetArgs([]string{})
-	sub.SilenceUsage, sub.SilenceErrors = true, true
+	f := cmd.Flags()
+	f.BoolVar(&yes, "yes", false, "no prompts; keep every carried value and take the defaults for the rest")
+	f.BoolVar(&moveRepos, "move-repos", false, "move boards and task-skills checkouts under ~/.contextmatrix")
 
-	return sub
+	return cmd
 }

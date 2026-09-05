@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mhersson/contextmatrix-setup/internal/bootstrap"
@@ -62,7 +63,10 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	// A migrated or partially installed config already carries values the
 	// merge prefers; what the user changed since is forced over them.
 	existing := e.loadTrees()
-	prefill := AnswersFrom(existing)
+	prefill, _ := AnswersFrom(existing)
+	// The wizard normalizes what it returns, so the carried answers are
+	// compared in the same form or a boards dir named "boards" looks changed.
+	prefill.Normalize()
 
 	facts, err := e.freshFacts(ctx, a, existing)
 	if err != nil {
@@ -95,6 +99,16 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	trees := Opinionated(a, facts)
 	force := forcedAnswers(a, prefill, trees)
 	results := map[string]configResult{}
+
+	// A migrated config names the image its old install ran; the one built
+	// here is the only one this install maintains.
+	if facts.AgentImage != "" {
+		force[repos.Agent]["base_image"] = facts.AgentImage
+	}
+
+	if facts.ChatImage != "" {
+		force[repos.Chat]["base_image"] = facts.ChatImage
+	}
 
 	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat} {
 		res, err := e.writeConfig(ctx, repo, op, force[repo])
@@ -191,8 +205,14 @@ func (e *Engine) freshFacts(ctx context.Context, a Answers, existing Trees) (Fac
 	f := Facts{Layout: e.L, Gateway: e.gateway(ctx), Docker: e.Host.Docker, Keys: keys, InstanceID: id}
 
 	if a.GitHubMode == "app" {
+		// A carried path may use the ~ form the server accepts for this key.
+		src := a.GitHubKeyFile
+		if strings.HasPrefix(src, "~/") {
+			src = filepath.Join(e.L.Home, src[2:])
+		}
+
 		f.GitHubKey = filepath.Join(e.L.ServerStateDir(), "github-app.pem")
-		if err := copyFile(a.GitHubKeyFile, f.GitHubKey); err != nil {
+		if err := copyFile(src, f.GitHubKey); err != nil {
 			return Facts{}, fmt.Errorf("copy github app key: %w", err)
 		}
 	}

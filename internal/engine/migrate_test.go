@@ -26,7 +26,7 @@ func TestMigrateThenInstallCarriesValuesOver(t *testing.T) {
 	}
 
 	write(l.OldServerConfig(), "port: 8080\nmcp_api_key: OLDMCP\ngithub:\n  auth_mode: pat\n  pat:\n    token: T\nboards:\n  dir: ~/contextmatrix-boards\n")
-	write(l.OldAgentConfig(), "port: 9092\napi_key: OLDAGENT\n")
+	write(l.OldAgentConfig(), "port: 9092\napi_key: OLDAGENT\nbase_image: contextmatrix-agent-worker:dev\n")
 	write(l.OldChatConfig(), "port: 9093\napi_key: OLDCHAT\n")
 	write(filepath.Join(l.OldStateDir, "master.key"), "K")
 	write(filepath.Join(l.OldStateDir, "instance_id"), "oldbox-111111\n")
@@ -52,7 +52,7 @@ func TestMigrateThenInstallCarriesValuesOver(t *testing.T) {
 	assert.Contains(t, st.Migration.From, l.OldServerConfig())
 
 	// Install afterwards keeps every carried value.
-	answers := AnswersFrom(Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
+	answers, _ := AnswersFrom(Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
 	assert.Equal(t, 8080, answers.ServerPort)
 
 	require.NoError(t, h.e.Install(context.Background(), answers))
@@ -67,6 +67,7 @@ func TestMigrateThenInstallCarriesValuesOver(t *testing.T) {
 	agent, _, _ := configsync.LoadFile(l.AgentConfig())
 	assert.Equal(t, "OLDAGENT", get(t, agent, "api_key"))
 	assert.Equal(t, "OLDMCP", get(t, agent, "mcp_api_key"))
+	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", get(t, agent, "base_image"), "the image this install built replaces the carried one")
 
 	data, err = os.ReadFile(filepath.Join(l.WorkflowSkillsDir(), "create-plan.md"))
 	require.NoError(t, err)
@@ -156,7 +157,7 @@ func TestInstallAfterMigrationForcesChangedAnswers(t *testing.T) {
 	require.NoError(t, h.e.Migrate(context.Background(), plan))
 
 	// What the wizard shows after a migration, with two values changed.
-	answers := AnswersFrom(Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
+	answers, _ := AnswersFrom(Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
 	answers.ServerPort = 28080
 	answers.AuthMode = "none"
 
@@ -205,4 +206,31 @@ func TestMigrateRemovesOldUnits(t *testing.T) {
 	}
 
 	assert.NoFileExists(t, unit, "the old unit points at a config the migration deletes")
+}
+
+func TestInstallAfterMigrationKeepsABoardsDirNamedBoards(t *testing.T) {
+	h := newHarness(t, true)
+	l := h.e.L
+
+	write := func(p, s string) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(s), 0o600))
+	}
+
+	write(l.OldServerConfig(), "port: 8080\ngithub:\n  auth_mode: pat\n  pat:\n    token: T\nboards:\n  dir: ~/work/boards\n  git_remote_url: https://example.test/team-boards.git\n")
+
+	plan, err := migrate.Build(l, migrate.Detect(l), nil)
+	require.NoError(t, err)
+	require.NoError(t, h.e.Migrate(context.Background(), plan))
+
+	// The wizard normalizes its answers, and "boards" counts as unset there;
+	// the carried dir must still not be repointed.
+	answers, _ := AnswersFrom(Trees{Server: plan.Server})
+	answers.Normalize()
+
+	require.NoError(t, h.e.Install(context.Background(), answers))
+
+	server, _, err := configsync.LoadFile(l.ServerConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "~/work/boards", get(t, server, "boards.dir"))
 }

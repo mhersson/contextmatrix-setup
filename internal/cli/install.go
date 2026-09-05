@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -110,24 +111,22 @@ func newInstallCmd() *cobra.Command {
 				return err
 			}
 
-			if missing := e.Host.Missing(); len(missing) > 0 {
-				return fmt.Errorf("missing required tools: %v", missing)
+			if err := requireTools(e); err != nil {
+				return err
 			}
 
-			st, _, err := state.Load(e.L.StateFile())
+			installed, err := isInstalled(e)
 			if err != nil {
 				return err
 			}
 
-			if st.Installed() {
-				fmt.Fprintln(cmd.OutOrStdout(), "already installed; running update instead")
-
-				return e.Update(ctx, engine.UpdateOptions{Yes: yes, Confirm: confirmPrompt(cmd)})
+			if installed {
+				return updateInstead(cmd, e, yes)
 			}
 
-			found := migrate.Detect(e.L)
+			var known engine.Known
 
-			if found.Any() {
+			if found := migrate.Detect(e.L); found.Any() {
 				want := doMigrate
 
 				if !yes {
@@ -137,50 +136,96 @@ func newInstallCmd() *cobra.Command {
 				}
 
 				if want {
-					plan, err := migrate.Build(e.L, found, nil)
+					prefill, k, err := migrateInstall(ctx, e, found, yes, moveRepos)
 					if err != nil {
 						return err
 					}
 
-					moves := map[string]bool{}
-
-					if yes {
-						for _, d := range plan.RepoDirs {
-							moves[d.Key] = moveRepos
-						}
-					} else if moves, err = wizard.AskMoveRepos(plan.RepoDirs); err != nil {
-						return err
-					}
-
-					if plan, err = migrate.Build(e.L, found, moves); err != nil {
-						return err
-					}
-
-					if err := e.Migrate(ctx, plan); err != nil {
-						return err
-					}
-
-					prefill := engine.AnswersFrom(engine.Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
 					overlayChangedFlags(cmd.Flags(), &prefill, a)
 					prefill.Services, prefill.Linger = a.Services, a.Linger
-					a = prefill
+					a, known = prefill, k
 				}
 			}
 
-			if !yes {
-				open := func(u string) error { return host.OpenBrowser(ctx, e.R, runtime.GOOS, u) }
-				if a, err = wizard.Run(a, e.Host, open); err != nil {
-					return err
-				}
-			}
-
-			return e.Install(ctx, a)
+			return finishInstall(cmd, e, a, known, yes)
 		},
 	}
 
 	installFlags(cmd, &a, &yes, &doMigrate, &moveRepos)
 
 	return cmd
+}
+
+func requireTools(e *engine.Engine) error {
+	if missing := e.Host.Missing(); len(missing) > 0 {
+		return fmt.Errorf("missing required tools: %v", missing)
+	}
+
+	return nil
+}
+
+func isInstalled(e *engine.Engine) (bool, error) {
+	st, _, err := state.Load(e.L.StateFile())
+	if err != nil {
+		return false, err
+	}
+
+	return st.Installed(), nil
+}
+
+func updateInstead(cmd *cobra.Command, e *engine.Engine, yes bool) error {
+	fmt.Fprintln(cmd.OutOrStdout(), "already installed; running update instead")
+
+	return e.Update(cmd.Context(), engine.UpdateOptions{Yes: yes, Confirm: confirmPrompt(cmd)})
+}
+
+// migrateInstall moves the old layout and returns the answers it carried,
+// with what the old config held marked as known. Repos move on request:
+// the flag with --yes, a prompt otherwise.
+func migrateInstall(ctx context.Context, e *engine.Engine, found migrate.Found, yes, moveRepos bool) (engine.Answers, engine.Known, error) {
+	plan, err := migrate.Build(e.L, found, nil)
+	if err != nil {
+		return engine.Answers{}, engine.Known{}, err
+	}
+
+	moves := map[string]bool{}
+
+	if yes {
+		for _, d := range plan.RepoDirs {
+			moves[d.Key] = moveRepos
+		}
+	} else if moves, err = wizard.AskMoveRepos(plan.RepoDirs); err != nil {
+		return engine.Answers{}, engine.Known{}, err
+	}
+
+	if plan, err = migrate.Build(e.L, found, moves); err != nil {
+		return engine.Answers{}, engine.Known{}, err
+	}
+
+	if err := e.Migrate(ctx, plan); err != nil {
+		return engine.Answers{}, engine.Known{}, err
+	}
+
+	a, known := engine.AnswersFrom(engine.Trees{Server: plan.Server, Agent: plan.Agent, Chat: plan.Chat})
+
+	return a, known, nil
+}
+
+// finishInstall runs the wizard unless --yes was given, then installs.
+func finishInstall(cmd *cobra.Command, e *engine.Engine, a engine.Answers, known engine.Known, yes bool) error {
+	ctx := cmd.Context()
+
+	if !yes {
+		open := func(u string) error { return host.OpenBrowser(ctx, e.R, runtime.GOOS, u) }
+
+		var err error
+
+		if a, err = wizard.Run(a, known, e.Host, open); err != nil {
+			return err
+		}
+	}
+
+	return e.Install(ctx, a)
 }
 
 // confirmPrompt asks a plain y/N question on the command's input.

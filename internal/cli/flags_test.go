@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"context"
-	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -74,29 +72,6 @@ func TestOverlayChangedFlags(t *testing.T) {
 	assert.Equal(t, "https://example.test/skills.git", prefill.TaskSkillsURL)
 	assert.Equal(t, "https://example.test/boards.git", prefill.BoardsURL)
 	assert.Equal(t, "carried-boards", prefill.BoardsName)
-}
-
-// TestChainedInstallAcceptsNoArgs pins the argument handling of the install
-// command run from inside migrate. Cobra falls back to os.Args when a command
-// has no argument list of its own.
-func TestChainedInstallAcceptsNoArgs(t *testing.T) {
-	saved := os.Args
-
-	t.Cleanup(func() { os.Args = saved })
-
-	os.Args = []string{"contextmatrix-setup", "migrate"}
-
-	sub := chainedInstall()
-	sub.RunE = func(*cobra.Command, []string) error { return nil }
-
-	require.NoError(t, sub.ExecuteContext(context.Background()))
-
-	// Without the empty argument list the same command rejects "migrate".
-	bare := newInstallCmd()
-	bare.RunE = func(*cobra.Command, []string) error { return nil }
-	bare.SilenceUsage, bare.SilenceErrors = true, true
-
-	require.Error(t, bare.ExecuteContext(context.Background()))
 }
 
 func TestRootHasRealCommands(t *testing.T) {

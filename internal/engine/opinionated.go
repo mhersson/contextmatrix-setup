@@ -27,7 +27,7 @@ type Trees struct {
 
 // Opinionated returns the values the installer writes on a fresh install.
 // Every value here loses to an existing user value in the merge, except
-// base_image, which the update flow sets explicitly after each build.
+// base_image, which both flows force after a build.
 func Opinionated(a Answers, f Facts) Trees {
 	l := f.Layout
 	serverURL := fmt.Sprintf("http://localhost:%d", a.ServerPort)

@@ -82,7 +82,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	// Existing values feed the opinionated tree so nothing is regenerated.
 	existing := e.loadTrees()
-	answers := AnswersFrom(existing)
+	answers, _ := AnswersFrom(existing)
 
 	keys, instanceID, err := e.resolveIdentity(existing)
 	if err != nil {
@@ -278,48 +278,109 @@ func (e *Engine) loadTrees() Trees {
 	return Trees{Server: load(e.L.ServerConfig()), Agent: load(e.L.AgentConfig()), Chat: load(e.L.ChatConfig())}
 }
 
-// AnswersFrom rebuilds answers from installed or migrated config trees. The
-// update flow uses it for opinionated values (existing user values win over
-// them anyway); the wizard uses it to prefill after a migration.
-func AnswersFrom(t Trees) Answers {
+// AnswersFrom rebuilds answers from installed or migrated config trees and
+// reports which of them the trees held. The update flow uses the answers for
+// opinionated values (existing user values win over them anyway); the wizard
+// prefills from them and skips what is known after a migration.
+func AnswersFrom(t Trees) (Answers, Known) {
 	a := DefaultAnswers()
 
-	port := func(tr configsync.Tree, path string, fallback int) int {
+	var k Known
+
+	str := func(tr configsync.Tree, path string) string {
+		v, _ := configsync.Get(tr, path)
+		s, _ := v.(string)
+
+		return s
+	}
+
+	port := func(tr configsync.Tree, path string, fallback int) (int, bool) {
 		v, ok := configsync.Get(tr, path)
 		if !ok {
-			return fallback
+			return fallback, false
 		}
 
 		if n, ok := v.(int); ok && n > 0 {
-			return n
+			return n, true
 		}
 
-		return fallback
+		return fallback, false
 	}
 
-	a.ServerPort = port(t.Server, "port", a.ServerPort)
-	a.AgentPort = port(t.Agent, "port", a.AgentPort)
-	a.ChatPort = port(t.Chat, "port", a.ChatPort)
+	var server, agent, chat bool
 
-	if v, ok := configsync.Get(t.Server, "auth.mode"); ok {
-		if s, ok := v.(string); ok && s != "" {
-			a.AuthMode = s
+	a.ServerPort, server = port(t.Server, "port", a.ServerPort)
+	a.AgentPort, agent = port(t.Agent, "port", a.AgentPort)
+	a.ChatPort, chat = port(t.Chat, "port", a.ChatPort)
+	k.Ports = server && agent && chat
+
+	if s := str(t.Server, "auth.mode"); s != "" {
+		a.AuthMode, k.AuthMode = s, true
+	}
+
+	if s := str(t.Server, "backends.agent.default_model"); s != "" {
+		a.DefaultModel, k.DefaultModel = s, true
+	}
+
+	if s := str(t.Server, "llm_endpoint.api_key"); s != "" {
+		a.OpenRouterKey, k.OpenRouterKey = s, true
+	}
+
+	if s := str(t.Server, "backends.agent.aa_api_key"); s != "" {
+		a.AAKey, k.AAKey = s, true
+	}
+
+	switch mode := str(t.Server, "github.auth_mode"); mode {
+	case "pat":
+		a.GitHubMode = mode
+		a.GitHubPAT = str(t.Server, "github.pat.token")
+	case "app":
+		a.GitHubMode = mode
+		a.GitHubAppID = integer(t.Server, "github.app.app_id")
+		a.GitHubInstallID = integer(t.Server, "github.app.installation_id")
+		a.GitHubKeyFile = str(t.Server, "github.app.private_key_path")
+	}
+
+	k.GitHub = a.githubComplete()
+
+	a.TaskSkillsURL = str(t.Server, "task_skills.git_remote_url")
+	k.TaskSkills = a.TaskSkillsURL != "" || str(t.Server, "task_skills.dir") != ""
+
+	// An old config may list several boards; the answers describe the first.
+	boards := t.Server["boards"]
+	if list, ok := boards.([]any); ok && len(list) > 0 {
+		boards = list[0]
+	}
+
+	if entry, ok := boards.(map[string]any); ok {
+		a.BoardsURL = str(entry, "git_remote_url")
+
+		if dir := str(entry, "dir"); dir != "" {
+			a.BoardsName = filepath.Base(dir)
+			k.Boards = true
 		}
+
+		k.Boards = k.Boards || a.BoardsURL != ""
 	}
 
-	if v, ok := configsync.Get(t.Server, "backends.agent.default_model"); ok {
-		if s, ok := v.(string); ok && s != "" {
-			a.DefaultModel = s
-		}
-	}
+	return a, k
+}
 
-	if v, ok := configsync.Get(t.Server, "boards.dir"); ok {
-		if s, ok := v.(string); ok && s != "" {
-			a.BoardsName = filepath.Base(s)
-		}
-	}
+// integer reads a whole number the YAML decoder or a Set call may have typed
+// differently.
+func integer(tr configsync.Tree, path string) int64 {
+	v, _ := configsync.Get(tr, path)
 
-	return a
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	default:
+		return 0
+	}
 }
 
 func (e *Engine) printRecentLogs(ctx context.Context, repo string) {
