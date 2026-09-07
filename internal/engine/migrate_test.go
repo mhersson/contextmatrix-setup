@@ -77,6 +77,33 @@ func TestMigrateThenInstallCarriesValuesOver(t *testing.T) {
 	assert.Contains(t, string(unit), "-"+filepath.Join(l.Home, "contextmatrix-boards"), "kept-in-place boards dir is writable")
 }
 
+func TestMigrateThenInstallKeepsAnOpenAIEndpoint(t *testing.T) {
+	h := newHarness(t, true)
+	l := h.e.L
+
+	write := func(p, s string) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(s), 0o600))
+	}
+
+	write(l.OldServerConfig(), "port: 8080\nmcp_api_key: OLDMCP\ngithub:\n  auth_mode: pat\n  pat:\n    token: T\nllm_endpoint:\n  type: openai\n  base_url: https://api.openai.com/v1\n  api_key: sk-openai\n")
+
+	plan, err := migrate.Build(l, migrate.Detect(l), nil)
+	require.NoError(t, err)
+	require.NoError(t, h.e.Migrate(context.Background(), plan))
+
+	answers, _ := AnswersFrom(Trees{Server: plan.Server})
+	answers.Normalize()
+
+	require.NoError(t, h.e.Install(context.Background(), answers))
+
+	server, _, err := configsync.LoadFile(l.ServerConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "openai", get(t, server, "llm_endpoint.type"), "an unchanged carried key must not force the type")
+	assert.Equal(t, "https://api.openai.com/v1", get(t, server, "llm_endpoint.base_url"))
+	assert.Equal(t, "sk-openai", get(t, server, "llm_endpoint.api_key"))
+}
+
 func writeOldLayout(t *testing.T, l layout.Layout) {
 	t.Helper()
 

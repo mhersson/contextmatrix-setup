@@ -265,7 +265,10 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 		agent("default_model")
 	}
 
-	if a.OpenRouterKey != "" {
+	// An unchanged key means the answers still describe the carried
+	// endpoint, whatever its type; forcing would overwrite an OpenAI
+	// endpoint with the OpenRouter default.
+	if a.OpenRouterKey != "" && a.OpenRouterKey != prefill.OpenRouterKey {
 		server("llm_endpoint.type", "llm_endpoint.api_key")
 	}
 
