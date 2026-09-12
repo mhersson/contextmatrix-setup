@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
@@ -28,6 +30,7 @@ type Status struct {
 	Docker     bool
 	DockerHint string
 	Images     map[string]string
+	Variants   map[string][]string
 	Manager    string
 }
 
@@ -39,7 +42,14 @@ func (e *Engine) Status(ctx context.Context) (Status, error) {
 
 	e.useRecordedManager(st.ServiceManager)
 
-	s := Status{Ports: map[string]int{}, Images: map[string]string{}, Docker: e.Host.Docker, DockerHint: e.Host.DockerHint, Manager: e.Services.Kind()}
+	s := Status{
+		Ports:      map[string]int{},
+		Images:     map[string]string{},
+		Variants:   map[string][]string{},
+		Docker:     e.Host.Docker,
+		DockerHint: e.Host.DockerHint,
+		Manager:    e.Services.Kind(),
+	}
 
 	for _, repo := range repos.Apps {
 		cached, _ := e.Git.Head(ctx, e.L.SrcDir(repo))
@@ -59,6 +69,12 @@ func (e *Engine) Status(ctx context.Context) (Status, error) {
 
 	for family, img := range st.Images {
 		s.Images[family] = img.Tag
+
+		for v := range img.Variants {
+			s.Variants[family] = append(s.Variants[family], v)
+		}
+
+		sort.Strings(s.Variants[family])
 	}
 
 	return s, nil
@@ -89,7 +105,12 @@ func (e *Engine) PrintStatus(s Status) {
 	}
 
 	for family, tag := range s.Images {
-		e.logf("%-22s %s", family, tag)
+		line := tag
+		if vs := s.Variants[family]; len(vs) > 0 {
+			line += "  variants: " + strings.Join(vs, " ")
+		}
+
+		e.logf("%-22s %s", family, line)
 	}
 }
 

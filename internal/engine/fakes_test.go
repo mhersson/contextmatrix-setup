@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/host"
+	"github.com/mhersson/contextmatrix-setup/internal/images"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 	"github.com/mhersson/contextmatrix-setup/internal/services"
@@ -60,20 +61,30 @@ func (fakeImages) Host(context.Context) string { return "" }
 
 func (fakeImages) BridgeGateway(context.Context) string { return "172.17.0.1" }
 
-func (f *fakeImages) Build(_ context.Context, _, repo, commit string, out io.Writer) (string, string, error) {
+// Build derives every image ID from the commit except the rust variant,
+// whose ID is constant so update tests see one unchanged variant.
+func (f *fakeImages) Build(_ context.Context, _, repo, commit string, out io.Writer) (images.Built, error) {
 	if f.fail {
-		return "", "", io.ErrUnexpectedEOF
+		return images.Built{}, io.ErrUnexpectedEOF
 	}
 
 	tag := repo + "-worker:" + commit[:7]
 	f.built = append(f.built, tag)
 	_, _ = io.WriteString(out, "built "+tag+"\n")
 
-	return tag, "sha256:" + commit, nil
+	return images.Built{
+		Tag: tag,
+		ID:  "sha256:" + commit,
+		Variants: map[string]string{
+			"go-node": "sha256:" + commit + "-go-node",
+			"python":  "sha256:" + commit + "-python",
+			"rust":    "sha256:rust-static",
+		},
+	}, nil
 }
 
-func (f *fakeImages) RemoveTag(_ context.Context, tag string) error {
-	f.removed = append(f.removed, tag)
+func (f *fakeImages) RemoveImage(_ context.Context, ref string) error {
+	f.removed = append(f.removed, ref)
 
 	return nil
 }

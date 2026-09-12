@@ -78,8 +78,8 @@ contextmatrix-setup update
 
 Pulls the four repos, shows what changed, rebuilds what moved, syncs your config
 files with upstream (new keys added, removed keys dropped with a note, your
-values kept), rebuilds a worker image only when its repo moved, and restarts
-only what changed. `--yes` skips the confirmation.
+values kept), rebuilds a backend's worker images only when its repo moved, and
+restarts only what changed. `--yes` skips the confirmation.
 
 ## Other commands
 
@@ -117,6 +117,18 @@ edit the config file, not the plist. launchd loads every plist in
 `~/Library/LaunchAgents` at login, so a service the installer did not start
 (GitHub skipped, invalid config, no docker) still starts at the next login until
 the cause is fixed and `contextmatrix-setup update` is run.
+
+## Worker images
+
+Each backend gets its default worker image, tagged per commit and written to
+`base_image`, plus the `go-node`, `python` and `rust` variants under their
+stable tags (`contextmatrix-agent-worker:go-node`,
+`contextmatrix-chat-worker:python`, and so on). A project's
+`remote_execution.worker_image` or `chat_worker_image` can name any of them
+from the project-settings picker, and the name keeps resolving after an update
+because the variant tags move to the rebuilt images. The images a rebuild
+untags are removed; `status` lists what is built. An install made before the
+variants existed builds them at its next `update`.
 
 ## Config files
 

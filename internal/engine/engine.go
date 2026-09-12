@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mhersson/contextmatrix-setup/internal/host"
+	"github.com/mhersson/contextmatrix-setup/internal/images"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
@@ -23,8 +24,8 @@ type Git interface {
 type Images interface {
 	Host(ctx context.Context) string
 	BridgeGateway(ctx context.Context) string
-	Build(ctx context.Context, repoDir, repo, commit string, out io.Writer) (string, string, error)
-	RemoveTag(ctx context.Context, tag string) error
+	Build(ctx context.Context, repoDir, repo, commit string, out io.Writer) (images.Built, error)
+	RemoveImage(ctx context.Context, ref string) error
 }
 
 type Engine struct {

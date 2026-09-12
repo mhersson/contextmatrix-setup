@@ -22,6 +22,9 @@ type Repo struct {
 type Image struct {
 	Tag string `yaml:"tag"`
 	ID  string `yaml:"id"`
+	// Variants maps a variant name to the image ID its stable tag pointed at
+	// after the last build, so an update can drop the image a rebuild untagged.
+	Variants map[string]string `yaml:"variants,omitempty"`
 }
 
 type ConfigHash struct {

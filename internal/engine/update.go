@@ -98,14 +98,23 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	if e.Host.Docker {
 		for _, repo := range []string{repos.Agent, repos.Chat} {
-			if !moved[repo] && !dockerAppeared {
+			family := images.Family(repo)
+			old := st.Images[family]
+
+			// An install made before the variants existed recorded only the
+			// default image; build once so project overrides can resolve.
+			missingVariants := old.Tag != "" && len(old.Variants) == 0
+			if !moved[repo] && !dockerAppeared && !missingVariants {
 				continue
 			}
 
-			family := images.Family(repo)
-			oldTags[repo] = st.Images[family].Tag
+			if missingVariants && !moved[repo] {
+				e.logf("%-22s variant images missing: building", repo)
+			}
 
-			tag, id, err := e.Images.Build(ctx, e.L.SrcDir(repo), repo, heads[repo], e.Out)
+			oldTags[repo] = old.Tag
+
+			b, err := e.Images.Build(ctx, e.L.SrcDir(repo), repo, heads[repo], e.Out)
 			if err != nil {
 				e.logf("%-22s image build failed, keeping %s: %v", repo, oldTags[repo], err)
 
@@ -114,9 +123,10 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 				continue
 			}
 
-			st.Images[family] = state.Image{Tag: tag, ID: id}
-			force[repo]["base_image"] = tag
-			imageChanged[repo] = tag != oldTags[repo]
+			st.Images[family] = state.Image{Tag: b.Tag, ID: b.ID, Variants: b.Variants}
+			force[repo]["base_image"] = b.Tag
+			imageChanged[repo] = b.Tag != oldTags[repo]
+			e.removeReplacedVariants(ctx, repo, old.Variants, b.Variants)
 		}
 	}
 
@@ -234,7 +244,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			e.logf("%-22s restarted", repo)
 
 			if old := oldTags[repo]; old != "" && imageChanged[repo] {
-				if err := e.Images.RemoveTag(ctx, old); err != nil {
+				if err := e.Images.RemoveImage(ctx, old); err != nil {
 					e.logf("%-22s could not remove old image %s: %v", repo, old, err)
 				}
 			}
@@ -390,4 +400,20 @@ func (e *Engine) printRecentLogs(ctx context.Context, repo string) {
 	}
 
 	e.logf("%s", logs)
+}
+
+// removeReplacedVariants drops the images a rebuild untagged. Variant tags
+// are stable and already point at the new images, so unlike the per-commit
+// default tag there is no restart to wait for.
+func (e *Engine) removeReplacedVariants(ctx context.Context, repo string, old, cur map[string]string) {
+	for _, v := range images.Variants {
+		id := old[v]
+		if id == "" || id == cur[v] {
+			continue
+		}
+
+		if err := e.Images.RemoveImage(ctx, id); err != nil {
+			e.logf("%-22s could not remove old %s variant image %s: %v", repo, v, id, err)
+		}
+	}
 }

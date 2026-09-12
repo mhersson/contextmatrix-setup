@@ -82,6 +82,35 @@ func TestUpdateNothingMovedIsQuiet(t *testing.T) {
 	assert.Empty(t, restarts(h))
 }
 
+// An install made before the variants existed records only the default
+// image; the next update builds the variants without a repo moving.
+func TestUpdateBuildsMissingVariants(t *testing.T) {
+	h := installed(t, true)
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+
+	for family, img := range st.Images {
+		img.Variants = nil
+		st.Images[family] = img
+	}
+
+	require.NoError(t, st.Save(h.e.L.StateFile()))
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{"contextmatrix-agent-worker:bbbbbbb", "contextmatrix-chat-worker:ccccccc"}, h.images.built)
+	assert.Empty(t, restarts(h), "same commit, same tag: nothing to restart")
+	assert.Empty(t, h.images.removed)
+	assert.Contains(t, h.out.String(), "variant images missing")
+
+	st, _, _ = state.Load(h.e.L.StateFile())
+	assert.Len(t, st.Images["contextmatrix-agent-worker"].Variants, 3)
+
+	h.images.built = nil
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+	assert.Empty(t, h.images.built, "recorded variants are not rebuilt")
+}
+
 func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
 	h := installed(t, true)
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
@@ -100,7 +129,11 @@ func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
 	assert.Contains(t, summary, "fix(agent): something")
 	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
 	assert.Equal(t, []string{"contextmatrix-agent"}, restarts(h))
-	assert.Equal(t, []string{"contextmatrix-agent-worker:bbbbbbb"}, h.images.removed, "old tag removed after restart")
+	assert.Equal(t, []string{
+		"sha256:bbbbbbb2222-go-node",
+		"sha256:bbbbbbb2222-python",
+		"contextmatrix-agent-worker:bbbbbbb",
+	}, h.images.removed, "replaced variants removed after the build, the old tag after restart, the unchanged rust variant kept")
 
 	agent, _, _ := configsync.LoadFile(h.e.L.AgentConfig())
 	assert.Equal(t, "contextmatrix-agent-worker:b999999", get(t, agent, "base_image"))
@@ -231,9 +264,12 @@ func TestStatusAndUninstall(t *testing.T) {
 	assert.Equal(t, 18080, s.Ports["contextmatrix"])
 	assert.True(t, s.Docker)
 	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", s.Images["contextmatrix-agent-worker"])
+	assert.Equal(t, []string{"go-node", "python", "rust"}, s.Variants["contextmatrix-chat-worker"])
 
 	h.e.PrintStatus(s)
 	assert.Contains(t, h.out.String(), "18080")
+	assert.Contains(t, h.out.String(), "contextmatrix-chat-worker:ccccccc")
+	assert.Contains(t, h.out.String(), "variants: go-node python rust")
 
 	require.NoError(t, h.e.Uninstall(context.Background()))
 
