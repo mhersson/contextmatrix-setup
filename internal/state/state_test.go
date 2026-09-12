@@ -27,7 +27,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	s.ServiceManager = "systemd"
 	s.Docker = true
 	s.Repos["contextmatrix"] = Repo{Commit: "abc1234", InstalledAt: time.Date(2026, 9, 4, 7, 0, 0, 0, time.UTC)}
-	s.Images["contextmatrix-agent-worker"] = Image{Tag: "contextmatrix-agent-worker:abc1234", ID: "sha256:deadbeef"}
+	s.Images["contextmatrix-agent-worker"] = Image{Tag: "contextmatrix-agent-worker:abc1234", ID: "sha256:deadbeef", Variants: map[string]string{"go-node": "sha256:g0"}}
 	s.Configs["server.yaml"] = ConfigHash{SHA256: "00ff"}
 	s.WorkflowSkills = WorkflowSkills{Commit: "abc1234", Files: map[string]string{"create-plan.md": "11aa"}}
 
@@ -43,6 +43,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	assert.True(t, back.Installed())
 	assert.Equal(t, s.Repos["contextmatrix"], back.Repos["contextmatrix"])
 	assert.Equal(t, "sha256:deadbeef", back.Images["contextmatrix-agent-worker"].ID)
+	assert.Equal(t, map[string]string{"go-node": "sha256:g0"}, back.Images["contextmatrix-agent-worker"].Variants)
 	assert.Equal(t, "11aa", back.WorkflowSkills.Files["create-plan.md"])
 	assert.Nil(t, back.Migration)
 }

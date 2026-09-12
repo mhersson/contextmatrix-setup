@@ -35,39 +35,64 @@ func TestHostAndGateway(t *testing.T) {
 	assert.Equal(t, "172.17.0.1", d.BridgeGateway(context.Background()))
 }
 
+func TestVariants(t *testing.T) {
+	assert.Equal(t, []string{"go-node", "python", "rust"}, Variants)
+	assert.Equal(t, "contextmatrix-chat-worker:python", VariantTag("contextmatrix-chat", "python"))
+}
+
 func TestBuildTagsAndInspects(t *testing.T) {
 	f := run.NewFake()
 	f.On("make", "docker-worker").Return("Successfully built\n", "", 0)
+	f.On("make", "docker-worker-variants").Return("variants built\n", "", 0)
 	f.On("docker", "tag").Return("", "", 0)
 	f.On("docker", "image", "inspect").Return("sha256:feedface\n", "", 0)
+	f.On("docker", "image", "inspect", "--format", "{{.Id}}", "contextmatrix-agent-worker:go-node").Return("sha256:g0\n", "", 0)
+	f.On("docker", "image", "inspect", "--format", "{{.Id}}", "contextmatrix-agent-worker:python").Return("sha256:py\n", "", 0)
+	f.On("docker", "image", "inspect", "--format", "{{.Id}}", "contextmatrix-agent-worker:rust").Return("sha256:rs\n", "", 0)
 
 	var out bytes.Buffer
 
-	tag, id, err := Docker{R: f}.Build(context.Background(), "/cache/src/contextmatrix-agent", "contextmatrix-agent", "abc1234567", &out)
+	b, err := Docker{R: f}.Build(context.Background(), "/cache/src/contextmatrix-agent", "contextmatrix-agent", "abc1234567", &out)
 	require.NoError(t, err)
-	assert.Equal(t, "contextmatrix-agent-worker:abc1234", tag)
-	assert.Equal(t, "sha256:feedface", id)
+	assert.Equal(t, "contextmatrix-agent-worker:abc1234", b.Tag)
+	assert.Equal(t, "sha256:feedface", b.ID)
+	assert.Equal(t, map[string]string{"go-node": "sha256:g0", "python": "sha256:py", "rust": "sha256:rs"}, b.Variants)
 	assert.Contains(t, out.String(), "Successfully built")
+	assert.Contains(t, out.String(), "variants built")
 
 	calls := f.Calls()
-	require.Len(t, calls, 3)
+	require.Len(t, calls, 7)
 	assert.Equal(t, "/cache/src/contextmatrix-agent", calls[0].Dir)
-	assert.Equal(t, []string{"tag", "contextmatrix-agent-worker:dev", "contextmatrix-agent-worker:abc1234"}, calls[1].Args)
+	assert.Equal(t, []string{"docker-worker"}, calls[0].Args)
+	assert.Equal(t, "/cache/src/contextmatrix-agent", calls[1].Dir)
+	assert.Equal(t, []string{"docker-worker-variants"}, calls[1].Args)
+	assert.Equal(t, []string{"tag", "contextmatrix-agent-worker:dev", "contextmatrix-agent-worker:abc1234"}, calls[2].Args)
 }
 
 func TestBuildFailureKeepsOldImage(t *testing.T) {
 	f := run.NewFake()
 	f.On("make", "docker-worker").Return("", "step 7 failed", 2)
 
-	_, _, err := Docker{R: f}.Build(context.Background(), "/x", "contextmatrix-chat", "abc", &bytes.Buffer{})
+	_, err := Docker{R: f}.Build(context.Background(), "/x", "contextmatrix-chat", "abc", &bytes.Buffer{})
 	require.Error(t, err)
 	assert.Len(t, f.Calls(), 1, "no tag after a failed build")
 }
 
-func TestRemoveTag(t *testing.T) {
+func TestVariantFailureKeepsOldImage(t *testing.T) {
+	f := run.NewFake()
+	f.On("make", "docker-worker").Return("ok\n", "", 0)
+	f.On("make", "docker-worker-variants").Return("", "rust stage failed", 2)
+
+	_, err := Docker{R: f}.Build(context.Background(), "/x", "contextmatrix-chat", "abc", &bytes.Buffer{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "variants")
+	assert.Len(t, f.Calls(), 2, "no tag after a failed variant build")
+}
+
+func TestRemoveImage(t *testing.T) {
 	f := run.NewFake()
 	f.On("docker", "rmi").Return("", "", 0)
 
-	require.NoError(t, Docker{R: f}.RemoveTag(context.Background(), "contextmatrix-agent-worker:old1234"))
-	assert.Equal(t, []string{"rmi", "contextmatrix-agent-worker:old1234"}, f.Calls()[0].Args)
+	require.NoError(t, Docker{R: f}.RemoveImage(context.Background(), "sha256:old"))
+	assert.Equal(t, []string{"rmi", "sha256:old"}, f.Calls()[0].Args)
 }

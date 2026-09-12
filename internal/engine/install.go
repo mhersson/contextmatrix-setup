@@ -75,17 +75,17 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 	if e.Host.Docker {
 		for _, repo := range []string{repos.Agent, repos.Chat} {
-			tag, id, err := e.Images.Build(ctx, e.L.SrcDir(repo), repo, heads[repo], e.Out)
+			b, err := e.Images.Build(ctx, e.L.SrcDir(repo), repo, heads[repo], e.Out)
 			if err != nil {
 				return err
 			}
 
-			st.Images[images.Family(repo)] = state.Image{Tag: tag, ID: id}
+			st.Images[images.Family(repo)] = state.Image{Tag: b.Tag, ID: b.ID, Variants: b.Variants}
 
 			if repo == repos.Agent {
-				facts.AgentImage = tag
+				facts.AgentImage = b.Tag
 			} else {
-				facts.ChatImage = tag
+				facts.ChatImage = b.Tag
 			}
 		}
 	} else {

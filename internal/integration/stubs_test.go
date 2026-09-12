@@ -71,7 +71,7 @@ sleep 3600
 EOF
     chmod +x "$GOBIN/$name"
     echo "make install $name" >> "$STUB_LOG" ;;
-  docker-worker) echo "make docker-worker $(basename "$PWD") $(git rev-parse --short HEAD)" >> "$STUB_LOG" ;;
+  docker-worker|docker-worker-variants) echo "make $1 $(basename "$PWD") $(git rev-parse --short HEAD)" >> "$STUB_LOG" ;;
   *) echo "make: unknown target $1" >&2; exit 2 ;;
 esac
 `)

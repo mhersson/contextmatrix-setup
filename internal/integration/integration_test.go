@@ -37,6 +37,8 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.Contains(t, log, "make install-frontend contextmatrix")
 	assert.Contains(t, log, "make docker-worker contextmatrix-agent")
 	assert.Contains(t, log, "make docker-worker contextmatrix-chat")
+	assert.Contains(t, log, "make docker-worker-variants contextmatrix-agent")
+	assert.Contains(t, log, "make docker-worker-variants contextmatrix-chat")
 	assert.Equal(t, 3, strings.Count(log, "systemctl --user start "))
 	assert.Contains(t, log, "xdg-open http://localhost:18080/auth/token/stub-token")
 
@@ -62,6 +64,8 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.NotContains(t, log, "make install contextmatrix-chat")
 	assert.NotContains(t, log, "make install-frontend", "only the server has a frontend")
 	assert.Contains(t, log, "make docker-worker contextmatrix-agent")
+	assert.Contains(t, log, "make docker-worker-variants contextmatrix-agent")
+	assert.NotContains(t, log, "make docker-worker-variants contextmatrix-chat")
 	assert.Contains(t, log, "systemctl --user restart contextmatrix-agent")
 	assert.NotContains(t, log, "systemctl --user restart contextmatrix-chat")
 	assert.Contains(t, log, "docker rmi contextmatrix-agent-worker:")

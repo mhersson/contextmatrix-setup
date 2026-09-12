@@ -26,6 +26,23 @@ func Tag(repo, commit string) string {
 	return Family(repo) + ":" + repos.Short(commit)
 }
 
+// Variants are the slim targets both backend Makefiles build next to the
+// default image. Their tags are stable, so a project's worker_image override
+// keeps resolving after an update.
+var Variants = []string{"go-node", "python", "rust"}
+
+func VariantTag(repo, variant string) string {
+	return Family(repo) + ":" + variant
+}
+
+// Built records one build of a repo's worker images: the per-commit tag of
+// the default image and the image ID behind each variant tag.
+type Built struct {
+	Tag      string
+	ID       string
+	Variants map[string]string
+}
+
 type Docker struct {
 	R run.Runner
 }
@@ -59,35 +76,48 @@ func (d Docker) BridgeGateway(ctx context.Context) string {
 	return strings.TrimSpace(res.Stdout)
 }
 
-// Build runs the repo's own image target and retags the result per commit.
-// A failed build returns before tagging, so the previous tag stays valid.
-func (d Docker) Build(ctx context.Context, repoDir, repo, commit string, out io.Writer) (string, string, error) {
+// Build runs the repo's image targets and retags the default result per
+// commit. A failed build returns before tagging, so the previous tag stays
+// valid; the variant tags move as their builds finish.
+func (d Docker) Build(ctx context.Context, repoDir, repo, commit string, out io.Writer) (Built, error) {
 	family := Family(repo)
 	if family == "" {
-		return "", "", fmt.Errorf("%s has no worker image", repo)
+		return Built{}, fmt.Errorf("%s has no worker image", repo)
 	}
 
 	if err := d.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"docker-worker"}, Dir: repoDir}, out); err != nil {
-		return "", "", fmt.Errorf("build %s image: %w", repo, err)
+		return Built{}, fmt.Errorf("build %s image: %w", repo, err)
 	}
 
-	tag := Tag(repo, commit)
+	if err := d.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"docker-worker-variants"}, Dir: repoDir}, out); err != nil {
+		return Built{}, fmt.Errorf("build %s image variants: %w", repo, err)
+	}
 
-	res, err := d.R.Run(ctx, run.Cmd{Name: "docker", Args: []string{"tag", family + ":dev", tag}})
+	b := Built{Tag: Tag(repo, commit), Variants: map[string]string{}}
+
+	res, err := d.R.Run(ctx, run.Cmd{Name: "docker", Args: []string{"tag", family + ":dev", b.Tag}})
 	if err != nil {
-		return "", "", err
+		return Built{}, err
 	}
 
 	if res.ExitCode != 0 {
-		return "", "", fmt.Errorf("docker tag %s: %s", tag, strings.TrimSpace(res.Stderr))
+		return Built{}, fmt.Errorf("docker tag %s: %s", b.Tag, strings.TrimSpace(res.Stderr))
 	}
 
-	id, err := d.ImageID(ctx, tag)
-	if err != nil {
-		return "", "", err
+	if b.ID, err = d.ImageID(ctx, b.Tag); err != nil {
+		return Built{}, err
 	}
 
-	return tag, id, nil
+	for _, v := range Variants {
+		id, err := d.ImageID(ctx, VariantTag(repo, v))
+		if err != nil {
+			return Built{}, err
+		}
+
+		b.Variants[v] = id
+	}
+
+	return b, nil
 }
 
 func (d Docker) ImageID(ctx context.Context, ref string) (string, error) {
@@ -103,14 +133,14 @@ func (d Docker) ImageID(ctx context.Context, ref string) (string, error) {
 	return strings.TrimSpace(res.Stdout), nil
 }
 
-func (d Docker) RemoveTag(ctx context.Context, tag string) error {
-	res, err := d.R.Run(ctx, run.Cmd{Name: "docker", Args: []string{"rmi", tag}})
+func (d Docker) RemoveImage(ctx context.Context, ref string) error {
+	res, err := d.R.Run(ctx, run.Cmd{Name: "docker", Args: []string{"rmi", ref}})
 	if err != nil {
 		return err
 	}
 
 	if res.ExitCode != 0 {
-		return fmt.Errorf("docker rmi %s: %s", tag, strings.TrimSpace(res.Stderr))
+		return fmt.Errorf("docker rmi %s: %s", ref, strings.TrimSpace(res.Stderr))
 	}
 
 	return nil
