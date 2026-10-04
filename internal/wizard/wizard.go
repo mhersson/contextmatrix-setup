@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
 	"github.com/mhersson/contextmatrix-setup/internal/host"

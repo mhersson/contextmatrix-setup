@@ -3,7 +3,7 @@ package wizard
 import (
 	"testing"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"

@@ -14,7 +14,7 @@ for the rest, your values are never overwritten.
 
 ### Tools
 
-git, go (1.26 or newer), make, node and npm (server frontend build). Docker is
+git, go (1.27 or newer), make, node and npm (server frontend build). Docker is
 optional: without it the install completes, the worker images are skipped, and
 the backends stay disabled until a later `update` finds docker. The welcome
 screen checks all of these before the first question.

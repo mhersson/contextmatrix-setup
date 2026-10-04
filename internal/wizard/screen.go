@@ -4,9 +4,10 @@ import (
 	"errors"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // Panel geometry: the frame never grows past panelWidth columns, and the
@@ -17,17 +18,24 @@ const (
 	padY       = 1
 )
 
-var (
-	accent = lipgloss.AdaptiveColor{Light: "#5A56E0", Dark: "#7571F9"}
-	muted  = lipgloss.AdaptiveColor{Light: "245", Dark: "243"}
+type styles struct {
+	frame, brand, muted lipgloss.Style
+}
 
-	frameStyle = lipgloss.NewStyle().
+func newStyles(dark bool) styles {
+	pick := lipgloss.LightDark(dark)
+	accent := pick(lipgloss.Color("#5A56E0"), lipgloss.Color("#7571F9"))
+	muted := pick(lipgloss.Color("245"), lipgloss.Color("243"))
+
+	return styles{
+		frame: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(accent).
-			Padding(padY, padX)
-	brandStyle = lipgloss.NewStyle().Foreground(accent).Bold(true)
-	mutedStyle = lipgloss.NewStyle().Foreground(muted)
-)
+			Padding(padY, padX),
+		brand: lipgloss.NewStyle().Foreground(accent).Bold(true),
+		muted: lipgloss.NewStyle().Foreground(muted),
+	}
+}
 
 // step builds the next form from what the earlier ones answered. A nil form
 // skips the step; an error ends the run with it.
@@ -43,14 +51,43 @@ type screen struct {
 	width  int
 	height int
 	err    error
+
+	// dark starts true, the same fallback lipgloss uses when the terminal
+	// does not answer the background colour query.
+	dark   bool
+	styles styles
 }
 
 func newScreen(steps ...step) *screen {
-	return &screen{steps: steps}
+	return &screen{steps: steps, dark: true, styles: newStyles(true)}
 }
 
 func (s *screen) Init() tea.Cmd {
-	return s.advance()
+	return tea.Batch(tea.RequestBackgroundColor, s.advance())
+}
+
+// theme follows the screen's background rather than huh's own detection,
+// which only reaches the group in focus when the answer arrives.
+func (s *screen) theme() huh.Theme {
+	return huh.ThemeFunc(func(bool) *huh.Styles { return charmTheme(s.dark) })
+}
+
+// charmTheme is huh's Charm theme with the option text and the blurred
+// button put back the right way round: huh v2 swaps their light and dark
+// colours, which leaves near-black option text on a dark terminal.
+func charmTheme(dark bool) *huh.Styles {
+	t := huh.ThemeCharm(dark)
+	pick := lipgloss.LightDark(dark)
+	normal := pick(lipgloss.Color("235"), lipgloss.Color("252"))
+	buttonBg := pick(lipgloss.Color("252"), lipgloss.Color("237"))
+
+	for _, f := range []*huh.FieldStyles{&t.Focused, &t.Blurred} {
+		f.Option = f.Option.Foreground(normal)
+		f.UnselectedOption = f.UnselectedOption.Foreground(normal)
+		f.BlurredButton = f.BlurredButton.Foreground(normal).Background(buttonBg)
+	}
+
+	return t
 }
 
 // advance installs the next form that is not skipped, or quits after the
@@ -70,7 +107,7 @@ func (s *screen) advance() tea.Cmd {
 			continue
 		}
 
-		s.form = form
+		s.form = form.WithTheme(s.theme())
 
 		// The form's own Init asks the terminal for its size; the size this
 		// screen already knows is handed over as well in case that fails.
@@ -93,9 +130,18 @@ func (s *screen) resize() tea.Cmd {
 }
 
 func (s *screen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		s.width, s.height = size.Width, size.Height
+	switch m := msg.(type) {
+	case tea.WindowSizeMsg:
+		s.width, s.height = m.Width, m.Height
 		msg = tea.WindowSizeMsg{Width: s.innerWidth(), Height: s.innerHeight()}
+	case tea.BackgroundColorMsg:
+		s.dark = m.IsDark()
+		s.styles = newStyles(s.dark)
+
+		if s.form != nil {
+			// Reapplying the theme refreshes the help styles huh caches.
+			s.form.WithTheme(s.theme())
+		}
 	}
 
 	if s.form == nil {
@@ -117,13 +163,22 @@ func (s *screen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (s *screen) View() string {
+// View keeps the alternate screen on even between forms, so the terminal
+// does not flash back to the shell while the next step is built.
+func (s *screen) View() tea.View {
+	v := tea.NewView(s.content())
+	v.AltScreen = true
+
+	return v
+}
+
+func (s *screen) content() string {
 	if s.form == nil || s.form.State != huh.StateNormal {
 		return ""
 	}
 
-	header := brandStyle.Render("ContextMatrix") + " " + mutedStyle.Render("setup")
-	panel := frameStyle.Width(s.frameWidth() - 2).Render(header + "\n\n" + s.form.View())
+	header := s.styles.brand.Render("ContextMatrix") + " " + s.styles.muted.Render("setup")
+	panel := s.styles.frame.Width(s.frameWidth()).Render(header + "\n\n" + s.form.View())
 
 	if s.width == 0 {
 		return panel
@@ -158,6 +213,12 @@ func (s *screen) innerHeight() int {
 // the output is not a terminal or ACCESSIBLE is set.
 func runSteps(steps ...step) error {
 	if accessible() {
+		// huh writes styled prompts straight to its output, so it goes through
+		// a writer that strips the colours a pipe or a plain terminal cannot show.
+		out := colorprofile.NewWriter(os.Stdout, os.Environ())
+		dark := out.Profile <= colorprofile.ASCII || lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+		theme := huh.ThemeFunc(func(bool) *huh.Styles { return charmTheme(dark) })
+
 		for _, st := range steps {
 			form, err := st()
 			if err != nil {
@@ -168,7 +229,7 @@ func runSteps(steps ...step) error {
 				continue
 			}
 
-			if err := form.WithAccessible(true).Run(); err != nil {
+			if err := form.WithAccessible(true).WithOutput(out).WithTheme(theme).Run(); err != nil {
 				return err
 			}
 		}
@@ -178,7 +239,7 @@ func runSteps(steps ...step) error {
 
 	s := newScreen(steps...)
 
-	if _, err := tea.NewProgram(s, tea.WithAltScreen()).Run(); err != nil {
+	if _, err := tea.NewProgram(s).Run(); err != nil {
 		if errors.Is(err, tea.ErrInterrupted) {
 			return huh.ErrUserAborted
 		}

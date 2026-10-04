@@ -275,8 +275,7 @@ func Apply(moves []Move, out io.Writer) error {
 		}
 
 		if err := os.Rename(m.From, m.To); err != nil {
-			var linkErr *os.LinkError
-			if !errors.As(err, &linkErr) {
+			if _, ok := errors.AsType[*os.LinkError](err); !ok {
 				return err
 			}
 
