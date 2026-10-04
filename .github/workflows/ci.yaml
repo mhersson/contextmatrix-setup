@@ -12,8 +12,8 @@ jobs:
   go-checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
       - name: go vet
@@ -25,6 +25,6 @@ jobs:
       - name: integration
         run: go test -tags integration -count=1 ./internal/integration/...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: latest
