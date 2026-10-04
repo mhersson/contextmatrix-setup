@@ -58,8 +58,7 @@ func (Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	err := cmd.Run()
 	res := Result{Stdout: stdout.String(), Stderr: stderr.String()}
 
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		res.ExitCode = exitErr.ExitCode()
 
 		return res, nil
@@ -81,8 +80,7 @@ func (Exec) Stream(ctx context.Context, c Cmd, out io.Writer) error {
 
 	err := cmd.Run()
 
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return &ExitError{Cmd: c, Code: exitErr.ExitCode(), Tail: tail.String()}
 	}
 

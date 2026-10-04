@@ -48,7 +48,7 @@ func Detect(ctx context.Context, r run.Runner, goos string, getenv func(string) 
 	}
 
 	if _, ok := info.Tools["go"]; !ok {
-		return info, errors.New("go is required: install Go 1.26 or newer and rerun")
+		return info, errors.New("go is required: install Go 1.27 or newer and rerun")
 	}
 
 	goBin, err := goBinDir(ctx, r, getenv)
