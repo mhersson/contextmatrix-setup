@@ -2,15 +2,16 @@ package wizard
 
 import (
 	"errors"
+	"image/color"
 	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ func TestScreenCentresTheFormInAFrame(t *testing.T) {
 	s.Init()
 	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	view := s.View()
+	view := s.View().Content
 	lines := strings.Split(view, "\n")
 	require.Len(t, lines, 30, "the view fills the terminal so the panel can sit in the middle")
 
@@ -66,7 +67,7 @@ func TestScreenWithoutASizeStillRendersThePanel(t *testing.T) {
 	s := newScreen(func() (*huh.Form, error) { return noteForm("Hello"), nil })
 	s.Init()
 
-	assert.Contains(t, s.View(), "Hello")
+	assert.Contains(t, s.View().Content, "Hello")
 }
 
 // drive runs a screen as a real program fed by the given key bytes.
@@ -164,4 +165,35 @@ func TestScreenStopsAtAStepError(t *testing.T) {
 	boom := errors.New("boom")
 	err := drive(t, "\r", func() (*huh.Form, error) { return noteForm("a"), nil }, func() (*huh.Form, error) { return nil, boom })
 	assert.ErrorIs(t, err, boom)
+}
+
+func TestScreenFollowsTheTerminalBackground(t *testing.T) {
+	const darkAccent, lightAccent = "38;2;117;113;249", "38;2;90;86;224"
+
+	s := newScreen(func() (*huh.Form, error) { return noteForm("Hello"), nil })
+	s.Init()
+
+	assert.Contains(t, s.View().Content, darkAccent, "dark is assumed until the terminal answers")
+
+	s.Update(tea.BackgroundColorMsg{Color: color.White})
+	assert.Contains(t, s.View().Content, lightAccent)
+	assert.NotContains(t, s.View().Content, darkAccent)
+}
+
+func TestCharmThemeKeepsOptionTextReadable(t *testing.T) {
+	for _, tc := range []struct {
+		dark       bool
+		text, back string
+	}{
+		{dark: true, text: "252", back: "237"},
+		{dark: false, text: "235", back: "252"},
+	} {
+		th := charmTheme(tc.dark)
+
+		for _, f := range []huh.FieldStyles{th.Focused, th.Blurred} {
+			assert.Equal(t, lipgloss.Color(tc.text), f.UnselectedOption.GetForeground(), "dark=%v", tc.dark)
+			assert.Equal(t, lipgloss.Color(tc.text), f.BlurredButton.GetForeground(), "dark=%v", tc.dark)
+			assert.Equal(t, lipgloss.Color(tc.back), f.BlurredButton.GetBackground(), "dark=%v", tc.dark)
+		}
+	}
 }
