@@ -131,7 +131,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 	valid := e.validateAll(ctx, results)
 
-	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree) {
+	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
 		e.logf("warning: %s", w)
 	}
 

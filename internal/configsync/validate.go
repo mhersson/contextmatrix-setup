@@ -37,10 +37,10 @@ type backendCheck struct {
 	tree    Tree
 }
 
-// CrossCheck reports value pairs that must agree across the three files.
+// CrossCheck reports value pairs that must agree across the four files.
 // It never edits; both locations are named so the user can pick which one
 // to fix.
-func CrossCheck(server, agent, chat Tree) []string {
+func CrossCheck(server, agent, chat, architect Tree) []string {
 	var out []string
 
 	check := func(aFile, aPath string, aTree Tree, bFile, bPath string, bTree Tree) {
@@ -54,6 +54,7 @@ func CrossCheck(server, agent, chat Tree) []string {
 
 	check("agent.yaml", "api_key", agent, "server.yaml", "backends.agent.api_key", server)
 	check("chat.yaml", "api_key", chat, "server.yaml", "backends.chat.api_key", server)
+	check("architect.yaml", "api_key", architect, "server.yaml", "backends.architect.api_key", server)
 	check("agent.yaml", "mcp_api_key", agent, "server.yaml", "mcp_api_key", server)
 
 	serverPort, _ := Get(server, "port")
@@ -61,6 +62,7 @@ func CrossCheck(server, agent, chat Tree) []string {
 	for _, pair := range []backendCheck{
 		{file: "agent.yaml", backend: "agent", tree: agent},
 		{file: "chat.yaml", backend: "chat", tree: chat},
+		{file: "architect.yaml", backend: "architect", tree: architect},
 	} {
 		if u, ok := Get(server, "backends."+pair.backend+".url"); ok {
 			if p, _ := Get(pair.tree, "port"); portOf(u) != fmt.Sprint(p) {

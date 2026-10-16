@@ -33,17 +33,34 @@ backends:
 	agent := mustParse(t, "port: 19092\napi_key: AGENT\nmcp_api_key: MCP\ncontextmatrix_url: http://localhost:18080\n")
 	chat := mustParse(t, "port: 19093\napi_key: CHAT\ncontextmatrix_url: http://localhost:18080\n")
 
-	assert.Empty(t, CrossCheck(server, agent, chat))
+	assert.Empty(t, CrossCheck(server, agent, chat, Tree{}))
 
 	Set(agent, "api_key", "OTHER")
 	Set(chat, "port", 19099)
 	Set(server, "mcp_api_key", "MCP2")
 	Set(agent, "contextmatrix_url", "http://localhost:1")
 
-	warnings := CrossCheck(server, agent, chat)
+	warnings := CrossCheck(server, agent, chat, Tree{})
 	require.Len(t, warnings, 4)
 	assert.Contains(t, warnings[0], "agent.yaml api_key")
 	assert.Contains(t, warnings[0], "server.yaml backends.agent.api_key")
+}
+
+func TestCrossCheckArchitect(t *testing.T) {
+	server := mustParse(t, `
+port: 18080
+backends:
+  architect: {url: "http://localhost:19094", api_key: ARCH}
+`)
+	architect := mustParse(t, "port: 19094\napi_key: ARCH\ncontextmatrix_url: http://localhost:18080\n")
+
+	assert.Empty(t, CrossCheck(server, Tree{}, Tree{}, architect))
+
+	Set(architect, "api_key", "OTHER")
+	Set(architect, "port", 19099)
+	Set(architect, "contextmatrix_url", "http://localhost:1")
+
+	assert.Len(t, CrossCheck(server, Tree{}, Tree{}, architect), 3, "key, port and CM URL each disagree")
 }
 
 func TestPortOf(t *testing.T) {
