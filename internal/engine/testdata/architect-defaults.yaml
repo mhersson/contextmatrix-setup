@@ -9,7 +9,7 @@ message_dedup_ttl_seconds: 600
 models: {}
 pack: ""
 port: 9095
-state_dir: /var/lib/contextmatrix-architect
+state_dir: ""
 watch_interval_seconds: 60
 webhook_replay_cache_size: 10000
 webhook_replay_skew_seconds: 330
