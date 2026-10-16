@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	Setup  = "contextmatrix-setup"
-	Server = "contextmatrix"
-	Agent  = "contextmatrix-agent"
-	Chat   = "contextmatrix-chat"
+	Setup     = "contextmatrix-setup"
+	Server    = "contextmatrix"
+	Agent     = "contextmatrix-agent"
+	Chat      = "contextmatrix-chat"
+	Architect = "contextmatrix-architect"
 )
 
 // Apps lists the application repos in install order: the server's config

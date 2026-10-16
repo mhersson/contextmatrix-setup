@@ -23,6 +23,8 @@ func TestFromEnvDefaults(t *testing.T) {
 
 	assert.Equal(t, "/home/u/.config/contextmatrix/server.yaml", l.ServerConfig())
 	assert.Equal(t, "/home/u/.config/contextmatrix/agent.yaml", l.ConfigFor("contextmatrix-agent"))
+	assert.Equal(t, "/home/u/.config/contextmatrix/architect.yaml", l.ConfigFor("contextmatrix-architect"))
+	assert.Empty(t, l.ConfigFor("contextmatrix-setup"), "the installer has no app config")
 	assert.Equal(t, "/home/u/.contextmatrix/setup/state.yaml", l.StateFile())
 	assert.Equal(t, "/home/u/.contextmatrix/boards/team", l.BoardsDir("team"))
 	assert.Equal(t, "/home/u/.cache/contextmatrix-setup/src/contextmatrix", l.SrcDir("contextmatrix"))
@@ -58,6 +60,7 @@ func TestRuntimeDirsAndTilde(t *testing.T) {
 		"/home/u/.contextmatrix/workflow-skills", "/home/u/.contextmatrix/task-skills", "/home/u/.contextmatrix/boards",
 		"/home/u/.contextmatrix/agent/secrets", "/home/u/.contextmatrix/agent/logs",
 		"/home/u/.contextmatrix/chat/secrets", "/home/u/.contextmatrix/chat/sessions",
+		"/home/u/.contextmatrix/architect",
 	} {
 		assert.Contains(t, dirs, want)
 	}
