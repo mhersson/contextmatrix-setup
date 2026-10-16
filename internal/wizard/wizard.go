@@ -16,7 +16,7 @@ import (
 )
 
 // welcome has no line breaks of its own: the note wraps it to the panel.
-const welcome = "This installer is opinionated. It uses high ports (18080, 19092, 19093), " +
+const welcome = "This installer is opinionated. It uses high ports (18080, 19092, 19093, 19094), " +
 	"keeps every file under ~/.contextmatrix and one config directory, and exposes " +
 	"only the settings a local setup needs. Everything else keeps the upstream " +
 	"default; edit the config files by hand for the rest."
@@ -120,6 +120,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 	}
 
 	serverPort, agentPort, chatPort := strconv.Itoa(a.ServerPort), strconv.Itoa(a.AgentPort), strconv.Itoa(a.ChatPort)
+	architectPort := strconv.Itoa(a.ArchitectPort)
 	appID, installID := strconv.FormatInt(a.GitHubAppID, 10), strconv.FormatInt(a.GitHubInstallID, 10)
 	prereqs := prerequisites(info)
 
@@ -162,6 +163,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 			huh.NewInput().Title("Server port").Value(&serverPort).Validate(port),
 			huh.NewInput().Title("Agent port").Value(&agentPort).Validate(port),
 			huh.NewInput().Title("Chat port").Value(&chatPort).Validate(port),
+			huh.NewInput().Title("Architect port").Value(&architectPort).Validate(port),
 		))
 	}
 
@@ -175,7 +177,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 		}
 
 		if !known.DefaultModel {
-			fields = append(fields, huh.NewInput().Title("Default model").Description("Used by both backends; chat cannot start without one.").Value(&a.DefaultModel))
+			fields = append(fields, huh.NewInput().Title("Default model").Description("Used by the agent and chat; chat cannot start without one. The architect defaults to "+engine.DefaultArchitectModel+"; --architect-model changes it.").Value(&a.DefaultModel))
 		}
 
 		groups = append(groups, huh.NewGroup(fields...))
@@ -284,6 +286,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 		a.ServerPort, _ = strconv.Atoi(serverPort)
 		a.AgentPort, _ = strconv.Atoi(agentPort)
 		a.ChatPort, _ = strconv.Atoi(chatPort)
+		a.ArchitectPort, _ = strconv.Atoi(architectPort)
 		a.GitHubAppID, _ = strconv.ParseInt(appID, 10, 64)
 		a.GitHubInstallID, _ = strconv.ParseInt(installID, 10, 64)
 		a.Normalize()
@@ -322,10 +325,10 @@ func Summary(a engine.Answers) string {
 	}
 
 	return fmt.Sprintf(
-		"login mode      %s\nports           server %d, agent %d, chat %d\nOpenRouter key  %s\ndefault model   %s\n"+
-			"GitHub          %s\nAA key          %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
-		a.AuthMode, a.ServerPort, a.AgentPort, a.ChatPort, mask(a.OpenRouterKey), a.DefaultModel,
-		a.GitHubMode, mask(a.AAKey), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
+		"login mode      %s\nports           server %d, agent %d, chat %d, architect %d\nOpenRouter key  %s\ndefault model   %s\n"+
+			"architect model %s\nGitHub          %s\nAA key          %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
+		a.AuthMode, a.ServerPort, a.AgentPort, a.ChatPort, a.ArchitectPort, mask(a.OpenRouterKey), a.DefaultModel,
+		a.ArchitectModel, a.GitHubMode, mask(a.AAKey), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
 }
 
 // note escapes the characters huh renders as markup in a note description
@@ -364,6 +367,15 @@ func prerequisites(info host.Info) string {
 		if info.DockerHint != "" {
 			fmt.Fprintf(&b, "          %s\n", info.DockerHint)
 		}
+	}
+
+	switch {
+	case info.Search.RG != "":
+		b.WriteString("  ok      rg\n")
+	case info.Search.ShellRG != "":
+		fmt.Fprintf(&b, "  MISSING rg on the service PATH (found at %s): the architect's grep tool fails; link it into %s. The install carries on\n", info.Search.ShellRG, info.GoBin)
+	default:
+		b.WriteString("  MISSING rg: the architect's grep tool fails without ripgrep; install it with your package manager. The install carries on\n")
 	}
 
 	fmt.Fprintf(&b, "  service manager: %s", info.ServiceManager)
