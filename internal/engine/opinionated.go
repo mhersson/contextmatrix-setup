@@ -20,9 +20,10 @@ type Facts struct {
 }
 
 type Trees struct {
-	Server configsync.Tree
-	Agent  configsync.Tree
-	Chat   configsync.Tree
+	Server    configsync.Tree
+	Agent     configsync.Tree
+	Chat      configsync.Tree
+	Architect configsync.Tree
 }
 
 // Opinionated returns the values the installer writes on a fresh install.

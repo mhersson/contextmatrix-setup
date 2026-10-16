@@ -314,9 +314,9 @@ func githubConfigured(server configsync.Tree) bool {
 // already carries values the other files are paired against, so only what
 // is missing is generated.
 func (e *Engine) resolveIdentity(existing Trees) (Keys, string, error) {
-	keys := e.currentKeys(existing.Server, existing.Agent, existing.Chat)
+	keys := e.currentKeys(existing)
 
-	if keys.MCP == "" || keys.Agent == "" || keys.Chat == "" {
+	if keys.MCP == "" || keys.Agent == "" || keys.Chat == "" || keys.Architect == "" {
 		fresh, err := NewKeys()
 		if err != nil {
 			return Keys{}, "", err
@@ -332,6 +332,10 @@ func (e *Engine) resolveIdentity(existing Trees) (Keys, string, error) {
 
 		if keys.Chat == "" {
 			keys.Chat = fresh.Chat
+		}
+
+		if keys.Architect == "" {
+			keys.Architect = fresh.Architect
 		}
 	}
 
@@ -351,7 +355,7 @@ func (e *Engine) resolveIdentity(existing Trees) (Keys, string, error) {
 
 // currentKeys reads the shared secrets from existing config trees so an
 // update never regenerates a key that is already in use.
-func (e *Engine) currentKeys(server, agent, chat configsync.Tree) Keys {
+func (e *Engine) currentKeys(t Trees) Keys {
 	str := func(t configsync.Tree, path string) string {
 		v, _ := configsync.Get(t, path)
 		s, _ := v.(string)
@@ -359,14 +363,23 @@ func (e *Engine) currentKeys(server, agent, chat configsync.Tree) Keys {
 		return s
 	}
 
-	k := Keys{MCP: str(server, "mcp_api_key"), Agent: str(agent, "api_key"), Chat: str(chat, "api_key")}
+	k := Keys{
+		MCP:       str(t.Server, "mcp_api_key"),
+		Agent:     str(t.Agent, "api_key"),
+		Chat:      str(t.Chat, "api_key"),
+		Architect: str(t.Architect, "api_key"),
+	}
 
 	if k.Agent == "" {
-		k.Agent = str(server, "backends.agent.api_key")
+		k.Agent = str(t.Server, "backends.agent.api_key")
 	}
 
 	if k.Chat == "" {
-		k.Chat = str(server, "backends.chat.api_key")
+		k.Chat = str(t.Server, "backends.chat.api_key")
+	}
+
+	if k.Architect == "" {
+		k.Architect = str(t.Server, "backends.architect.api_key")
 	}
 
 	return k

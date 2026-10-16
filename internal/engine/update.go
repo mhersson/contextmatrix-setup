@@ -285,7 +285,12 @@ func (e *Engine) loadTrees() Trees {
 		return t
 	}
 
-	return Trees{Server: load(e.L.ServerConfig()), Agent: load(e.L.AgentConfig()), Chat: load(e.L.ChatConfig())}
+	return Trees{
+		Server:    load(e.L.ServerConfig()),
+		Agent:     load(e.L.AgentConfig()),
+		Chat:      load(e.L.ChatConfig()),
+		Architect: load(e.L.ArchitectConfig()),
+	}
 }
 
 // AnswersFrom rebuilds answers from installed or migrated config trees and

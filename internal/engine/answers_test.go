@@ -77,7 +77,9 @@ func TestKeysAndInstanceID(t *testing.T) {
 	assert.Len(t, k.MCP, 64)
 	assert.Len(t, k.Agent, 64)
 	assert.Len(t, k.Chat, 64)
+	assert.Len(t, k.Architect, 64)
 	assert.NotEqual(t, k.MCP, k.Agent)
+	assert.NotEqual(t, k.Chat, k.Architect)
 
 	id, err := NewInstanceID("box")
 	require.NoError(t, err)

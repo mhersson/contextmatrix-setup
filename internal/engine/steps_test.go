@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
@@ -63,4 +64,24 @@ func TestServiceForRendersFixedPath(t *testing.T) {
 	h.e.Host.OS = "darwin"
 	s = h.e.serviceFor("contextmatrix-agent", configsync.Tree{})
 	assert.Equal(t, h.e.Host.GoBin+":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", s.Env["PATH"])
+}
+
+func TestResolveIdentityKeepsAndFillsTheArchitectKey(t *testing.T) {
+	e := pathsEngine()
+	paired := parseTree(t, "mcp_api_key: MCP\nbackends:\n  agent: {api_key: A}\n  chat: {api_key: C}\n  architect: {api_key: ARCH}\n")
+
+	keys, _, err := e.resolveIdentity(Trees{Server: paired})
+	require.NoError(t, err)
+	assert.Equal(t, Keys{MCP: "MCP", Agent: "A", Chat: "C", Architect: "ARCH"}, keys, "a key server.yaml already pairs is reused")
+
+	placeholder := parseTree(t, "mcp_api_key: MCP\nbackends:\n  agent: {api_key: A}\n  chat: {api_key: C}\n  architect: {api_key: \"\"}\n")
+
+	keys, _, err = e.resolveIdentity(Trees{Server: placeholder})
+	require.NoError(t, err)
+	assert.Equal(t, "A", keys.Agent, "existing keys survive")
+	assert.Len(t, keys.Architect, 64, "the empty placeholder gets a fresh key")
+
+	keys, _, err = e.resolveIdentity(Trees{Server: placeholder, Architect: parseTree(t, "api_key: FROMFILE\n")})
+	require.NoError(t, err)
+	assert.Equal(t, "FROMFILE", keys.Architect, "architect.yaml is read first")
 }
