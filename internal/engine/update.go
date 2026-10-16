@@ -49,6 +49,12 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 		moved[repo] = true
 
+		if old == "" {
+			fmt.Fprintf(&summary, "%s new at %s\n", repo, repos.Short(heads[repo]))
+
+			continue
+		}
+
 		log, err := e.Git.Log(ctx, e.L.SrcDir(repo), old, heads[repo])
 		if err != nil {
 			return err
@@ -140,6 +146,13 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	configChanged := map[string]bool{}
 	handEdited := map[string]bool{}
 
+	// An install made before the architect may already carry CM's empty,
+	// disabled architect block, which the merge would keep.
+	newArchitect := st.Repos[repos.Architect].Commit == ""
+	if newArchitect {
+		fillArchitectBlock(force[repos.Server], existing.Server, trees.Server)
+	}
+
 	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat, repos.Architect: trees.Architect} {
 		name := filepath.Base(e.L.ConfigFor(repo))
 
@@ -197,8 +210,13 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	}
 
 	unitChanged := map[string]bool{}
+	hold := map[string]string{}
 
 	if !unmanaged {
+		if reason := e.holdNewArchitect(newArchitect, results[repos.Architect].Tree); reason != "" {
+			hold[repos.Architect] = reason
+		}
+
 		for _, repo := range repos.Apps {
 			changed, err := e.Services.Install(ctx, e.serviceFor(repo, mergedTrees(results)))
 			if err != nil {
@@ -229,6 +247,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			e.logf("%-22s not started: github block missing in server.yaml", repo)
 		case needsDocker(repo) && !e.Host.Docker:
 			e.logf("%-22s not started: docker not available", repo)
+		case hold[repo] != "":
+			e.logf("%-22s not started: %s", repo, hold[repo])
 		case unmanaged:
 			// Nothing to restart, and the old image stays until the user
 			// restarts the process by hand.
@@ -264,8 +284,9 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	for _, repo := range repos.Apps {
 		// A repo whose image did not build stays on its recorded commit, so
-		// the next run sees it as moved again and retries the build.
-		if buildFailed[repo] {
+		// the next run sees it as moved again and retries the build; a held
+		// one stays unrecorded and is checked again.
+		if buildFailed[repo] || hold[repo] != "" {
 			continue
 		}
 

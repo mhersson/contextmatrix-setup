@@ -400,3 +400,22 @@ func TestInstallExpandsTildeInGitHubKeyFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "PEM", string(data), "a carried ~ path is read from the home directory")
 }
+
+func TestInstallHoldsTheArchitectWhenItsPortIsTaken(t *testing.T) {
+	h := newHarness(t, true)
+	h.e.PortFree = func(port int) bool { return port != 19094 }
+
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	assert.Equal(t, []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"}, starts(h))
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Empty(t, st.Repos["contextmatrix-architect"].Commit)
+	assert.Equal(t, "aaaaaaa1111", st.Repos["contextmatrix"].Commit)
+}

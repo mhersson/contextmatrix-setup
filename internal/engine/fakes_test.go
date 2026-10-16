@@ -162,6 +162,7 @@ func newHarness(t *testing.T, docker bool) *harness {
 		Out:      out,
 		Browser:  func(context.Context, string) error { return nil },
 		RepoURL:  func(n string) string { return "file:///origin/" + n },
+		PortFree: func(int) bool { return true },
 	}
 
 	return &harness{e: e, runner: f, git: git, images: img, out: out, home: home}

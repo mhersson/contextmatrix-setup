@@ -1,6 +1,10 @@
 package engine
 
-import "github.com/mhersson/contextmatrix-setup/internal/configsync"
+import (
+	"fmt"
+
+	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+)
 
 // fillArchitectBlock forces the opinionated architect entry over the empty,
 // disabled block CM's schema puts in server.yaml before the architect is
@@ -21,4 +25,22 @@ func fillArchitectBlock(force map[string]any, user, opinionated configsync.Tree)
 			force[k] = v
 		}
 	}
+}
+
+// holdNewArchitect names why an architect this run adds must not start: its
+// port is taken, so it would only restart in a loop. An installed architect
+// holds its own port, so only a new one is checked.
+func (e *Engine) holdNewArchitect(isNew bool, architect configsync.Tree) string {
+	if !isNew {
+		return ""
+	}
+
+	v, _ := configsync.Get(architect, "port")
+
+	port, ok := v.(int)
+	if !ok || e.portFree(port) {
+		return ""
+	}
+
+	return fmt.Sprintf("port %d is in use; set port in architect.yaml and backends.architect.url in server.yaml, then run update", port)
 }

@@ -45,6 +45,8 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		return err
 	}
 
+	newArchitect := st.Repos[repos.Architect].Commit == ""
+
 	heads, err := e.syncRepos(ctx, repos.Apps)
 	if err != nil {
 		return err
@@ -100,6 +102,10 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	force := forcedAnswers(a, prefill, trees)
 	results := map[string]configResult{}
 
+	if newArchitect {
+		fillArchitectBlock(force[repos.Server], existing.Server, trees.Server)
+	}
+
 	// A migrated config names the image its old install ran; the one built
 	// here is the only one this install maintains.
 	if facts.AgentImage != "" {
@@ -149,6 +155,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	}
 
 	started := map[string]bool{}
+	hold := map[string]string{}
 
 	if a.Services {
 		if err := e.installUnits(ctx, mergedTrees(results)); err != nil {
@@ -159,7 +166,11 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 			e.enableLinger(ctx)
 		}
 
-		started = e.startEligible(ctx, github, valid)
+		if reason := e.holdNewArchitect(newArchitect, results[repos.Architect].Tree); reason != "" {
+			hold[repos.Architect] = reason
+		}
+
+		started = e.startEligible(ctx, github, valid, hold)
 	} else {
 		e.printStartCommands()
 	}
@@ -177,6 +188,12 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	}
 
 	for _, repo := range repos.Apps {
+		// A held repo stays unrecorded, so the next update treats it as new
+		// and checks again.
+		if hold[repo] != "" {
+			continue
+		}
+
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}
 	}
 
@@ -425,8 +442,9 @@ func (e *Engine) enableLinger(ctx context.Context) {
 
 // startEligible starts what can run and reports what it started: the
 // server only with GitHub configured and a valid file, the worker backends
-// only with docker and a valid file, the architect with a valid file.
-func (e *Engine) startEligible(ctx context.Context, github bool, valid map[string]bool) map[string]bool {
+// only with docker and a valid file, the architect with a valid file. A
+// repo in hold is not started, for the reason given.
+func (e *Engine) startEligible(ctx context.Context, github bool, valid map[string]bool, hold map[string]string) map[string]bool {
 	started := map[string]bool{}
 
 	for _, repo := range repos.Apps {
@@ -437,6 +455,8 @@ func (e *Engine) startEligible(ctx context.Context, github bool, valid map[strin
 			e.logf("%-22s not started: fill in the github block of server.yaml, then run update", repo)
 		case needsDocker(repo) && !e.Host.Docker:
 			e.logf("%-22s not started: docker not available", repo)
+		case hold[repo] != "":
+			e.logf("%-22s not started: %s", repo, hold[repo])
 		default:
 			if err := e.Services.Start(ctx, repo); err != nil {
 				e.logf("%-22s start failed: %v", repo, err)
