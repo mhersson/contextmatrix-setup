@@ -40,6 +40,8 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		e.logf("services: no usable service manager (%s); start commands are printed instead", reason)
 	}
 
+	e.printSearchNotice()
+
 	st, _, err := state.Load(e.L.StateFile())
 	if err != nil {
 		return err
@@ -196,6 +198,9 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}
 	}
+
+	// Repeated last, so the build output above cannot scroll it away.
+	e.printSearchNotice()
 
 	return st.Save(e.L.StateFile())
 }

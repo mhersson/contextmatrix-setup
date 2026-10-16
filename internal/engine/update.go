@@ -32,6 +32,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	e.useRecordedManager(st.ServiceManager)
 	unmanaged := e.Services.Kind() == "none"
 
+	e.printSearchNotice()
+
 	heads, err := e.syncRepos(ctx, repos.Apps)
 	if err != nil {
 		return err
@@ -292,6 +294,9 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}
 	}
+
+	// Repeated last, so the build output above cannot scroll it away.
+	e.printSearchNotice()
 
 	return st.Save(e.L.StateFile())
 }
