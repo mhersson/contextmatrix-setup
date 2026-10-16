@@ -26,6 +26,8 @@ type Info struct {
 	DockerHint           string
 	ServiceManager       string
 	ServiceManagerReason string
+	// Search is what the architect's grep and glob tools find on ServicePath.
+	Search SearchTools
 }
 
 //nolint:gochecknoglobals // Required is part of the exported contract; the wizard reads it.
@@ -57,6 +59,7 @@ func Detect(ctx context.Context, r run.Runner, goos string, getenv func(string) 
 	}
 
 	info.GoBin = goBin
+	info.Search = ProbeSearchTools(info.ServicePath(), isExecutable, r.LookPath)
 
 	if _, ok := info.Tools["docker"]; ok {
 		res, err := r.Run(ctx, run.Cmd{Name: "docker", Args: []string{"info", "--format", "{{.ServerVersion}}"}})

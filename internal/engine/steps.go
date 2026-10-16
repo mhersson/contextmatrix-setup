@@ -132,7 +132,7 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 }
 
 func referenceFor(repo string) string {
-	if repo == repos.Server {
+	if repo == repos.Server || repo == repos.Architect {
 		return "config.yaml.example in " + repos.URL(repo)
 	}
 
@@ -198,13 +198,24 @@ func fileHash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (e *Engine) serviceFor(repo string, server configsync.Tree) services.Service {
+// mergedTrees collects the files a run just wrote, for the steps that read
+// across them.
+func mergedTrees(results map[string]configResult) Trees {
+	return Trees{
+		Server:    results[repos.Server].Tree,
+		Agent:     results[repos.Agent].Tree,
+		Chat:      results[repos.Chat].Tree,
+		Architect: results[repos.Architect].Tree,
+	}
+}
+
+func (e *Engine) serviceFor(repo string, t Trees) services.Service {
 	bin := e.Host.Binary(binaryFor(repo))
-	env := map[string]string{"HOME": e.L.Home, "PATH": e.unitPath()}
+	env := map[string]string{"HOME": e.L.Home, "PATH": e.Host.ServicePath()}
 
 	// The docker host is a static machine fact, not a per-call decision, so
 	// this lookup does not take the caller's context.
-	if h := e.Images.Host(context.Background()); h != "" && repo != repos.Server {
+	if h := e.Images.Host(context.Background()); h != "" && needsDocker(repo) {
 		env["DOCKER_HOST"] = h
 	}
 
@@ -221,27 +232,33 @@ func (e *Engine) serviceFor(repo string, server configsync.Tree) services.Servic
 	case repos.Server:
 		s.Description = "ContextMatrix server"
 		s.Args = []string{"-config", e.L.ServerConfig()}
-		s.ReadWritePaths = append(s.ReadWritePaths, e.serverPaths(server)...)
+		s.ReadWritePaths = append(s.ReadWritePaths, e.serverPaths(t.Server)...)
 	case repos.Agent:
 		s.Description = "ContextMatrix Agent (task backend)"
 		s.Args = []string{"serve", "--config", e.L.AgentConfig()}
 	case repos.Chat:
 		s.Description = "ContextMatrix Chat (chat backend)"
 		s.Args = []string{"serve", "--config", e.L.ChatConfig()}
+	case repos.Architect:
+		s.Description = "ContextMatrix Architect (blueprint backend)"
+		s.Args = []string{"serve", "--config", e.L.ArchitectConfig()}
+		s.ReadWritePaths = append(s.ReadWritePaths, e.architectPaths(t.Architect)...)
 	}
 
 	return s
 }
 
-// unitPath is the PATH a service runs with. It is fixed rather than copied
-// from the installer's environment: the unit text decides restarts byte for
-// byte, and the shell an update runs from must not be able to change it.
-func (e *Engine) unitPath() string {
-	if e.Host.OS == "darwin" {
-		return e.Host.GoBin + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+// architectPaths lists a state_dir the user moved outside StateDir. The
+// architect expands no ~, so only an absolute value is a path it writes.
+func (e *Engine) architectPaths(architect configsync.Tree) []string {
+	v, _ := configsync.Get(architect, "state_dir")
+
+	s, ok := v.(string)
+	if !ok || !filepath.IsAbs(s) || s == e.L.StateDir || strings.HasPrefix(s, e.L.StateDir+string(filepath.Separator)) {
+		return nil
 	}
 
-	return e.Host.GoBin + ":/usr/local/bin:/usr/bin:/bin"
+	return []string{s}
 }
 
 // serverPaths lists every directory the server writes, expanded from the
@@ -325,9 +342,9 @@ func githubConfigured(server configsync.Tree) bool {
 // already carries values the other files are paired against, so only what
 // is missing is generated.
 func (e *Engine) resolveIdentity(existing Trees) (Keys, string, error) {
-	keys := e.currentKeys(existing.Server, existing.Agent, existing.Chat)
+	keys := e.currentKeys(existing)
 
-	if keys.MCP == "" || keys.Agent == "" || keys.Chat == "" {
+	if keys.MCP == "" || keys.Agent == "" || keys.Chat == "" || keys.Architect == "" {
 		fresh, err := NewKeys()
 		if err != nil {
 			return Keys{}, "", err
@@ -343,6 +360,10 @@ func (e *Engine) resolveIdentity(existing Trees) (Keys, string, error) {
 
 		if keys.Chat == "" {
 			keys.Chat = fresh.Chat
+		}
+
+		if keys.Architect == "" {
+			keys.Architect = fresh.Architect
 		}
 	}
 
@@ -362,7 +383,7 @@ func (e *Engine) resolveIdentity(existing Trees) (Keys, string, error) {
 
 // currentKeys reads the shared secrets from existing config trees so an
 // update never regenerates a key that is already in use.
-func (e *Engine) currentKeys(server, agent, chat configsync.Tree) Keys {
+func (e *Engine) currentKeys(t Trees) Keys {
 	str := func(t configsync.Tree, path string) string {
 		v, _ := configsync.Get(t, path)
 		s, _ := v.(string)
@@ -370,14 +391,23 @@ func (e *Engine) currentKeys(server, agent, chat configsync.Tree) Keys {
 		return s
 	}
 
-	k := Keys{MCP: str(server, "mcp_api_key"), Agent: str(agent, "api_key"), Chat: str(chat, "api_key")}
+	k := Keys{
+		MCP:       str(t.Server, "mcp_api_key"),
+		Agent:     str(t.Agent, "api_key"),
+		Chat:      str(t.Chat, "api_key"),
+		Architect: str(t.Architect, "api_key"),
+	}
 
 	if k.Agent == "" {
-		k.Agent = str(server, "backends.agent.api_key")
+		k.Agent = str(t.Server, "backends.agent.api_key")
 	}
 
 	if k.Chat == "" {
-		k.Chat = str(server, "backends.chat.api_key")
+		k.Chat = str(t.Server, "backends.chat.api_key")
+	}
+
+	if k.Architect == "" {
+		k.Architect = str(t.Server, "backends.architect.api_key")
 	}
 
 	return k

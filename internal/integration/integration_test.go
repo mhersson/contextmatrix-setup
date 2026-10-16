@@ -11,6 +11,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
 func TestInstallUpdateCycle(t *testing.T) {
@@ -23,10 +26,13 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "server.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "agent.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "chat.yaml"))
+	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "architect.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".contextmatrix", "setup", "state.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".contextmatrix", "workflow-skills", "create-plan.md"))
 	assert.FileExists(t, filepath.Join(e.home, ".config", "systemd", "user", "contextmatrix.service"))
 	assert.FileExists(t, filepath.Join(e.gobin, "contextmatrix-agent"))
+	assert.FileExists(t, filepath.Join(e.gobin, "contextmatrix-architect"))
+	assert.FileExists(t, filepath.Join(e.home, ".config", "systemd", "user", "contextmatrix-architect.service"))
 
 	server := e.read(".config/contextmatrix/server.yaml")
 	assert.Contains(t, server, "port: 18080")
@@ -39,7 +45,8 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.Contains(t, log, "make docker-worker contextmatrix-chat")
 	assert.Contains(t, log, "make docker-worker-variants contextmatrix-agent")
 	assert.Contains(t, log, "make docker-worker-variants contextmatrix-chat")
-	assert.Equal(t, 3, strings.Count(log, "systemctl --user start "))
+	assert.Equal(t, 4, strings.Count(log, "systemctl --user start "))
+	assert.NotContains(t, log, "make docker-worker contextmatrix-architect", "the architect has no image")
 	assert.Contains(t, log, "xdg-open http://localhost:18080/auth/token/stub-token")
 
 	// Nothing moved: quiet.
@@ -62,6 +69,7 @@ func TestInstallUpdateCycle(t *testing.T) {
 	log = e.stubLog()
 	assert.Contains(t, log, "make install contextmatrix-agent")
 	assert.NotContains(t, log, "make install contextmatrix-chat")
+	assert.NotContains(t, log, "make install contextmatrix-architect")
 	assert.NotContains(t, log, "make install-frontend", "only the server has a frontend")
 	assert.Contains(t, log, "make docker-worker contextmatrix-agent")
 	assert.Contains(t, log, "make docker-worker-variants contextmatrix-agent")
@@ -139,7 +147,7 @@ func TestInstallWithoutDocker(t *testing.T) {
 	assert.Contains(t, out, "docker not available")
 	assert.Contains(t, e.read(".config/contextmatrix/server.yaml"), "enabled: false")
 	assert.NotContains(t, e.stubLog(), "docker-worker")
-	assert.Equal(t, 1, strings.Count(e.stubLog(), "systemctl --user start "), "only the server starts")
+	assert.Equal(t, 2, strings.Count(e.stubLog(), "systemctl --user start "), "the server and the architect start; the worker backends need docker")
 }
 
 func TestMigrateFromOldLayout(t *testing.T) {
@@ -206,4 +214,66 @@ func TestMigrateCommandCarriesValuesWithoutAsking(t *testing.T) {
 	assert.Contains(t, server, "git_remote_url: https://example.test/skills.git")
 	assert.Contains(t, e.read(".config/contextmatrix/agent.yaml"), "port: 9092")
 	assert.Contains(t, e.read(".config/contextmatrix/agent.yaml"), "contextmatrix_url: http://localhost:8080")
+}
+
+// An install made before setup knew the architect, whose morning update
+// already wrote CM's empty architect block, gets the architect at the next
+// update: built, configured on both ends, its unit written and started.
+func TestUpdateAddsTheArchitectToAnOlderInstall(t *testing.T) {
+	e := newEnv(t)
+
+	out, err := e.run("install", "--yes", "--auth-mode", "none", "--github-mode", "pat", "--github-pat", "t")
+	require.NoError(t, err, out)
+
+	stateFile := filepath.Join(e.home, ".contextmatrix", "setup", "state.yaml")
+	serverFile := filepath.Join(e.home, ".config", "contextmatrix", "server.yaml")
+
+	st, _, err := state.Load(stateFile)
+	require.NoError(t, err)
+	delete(st.Repos, "contextmatrix-architect")
+	delete(st.Configs, "architect.yaml")
+	require.NoError(t, st.Save(stateFile))
+
+	require.NoError(t, os.Remove(filepath.Join(e.home, ".config", "contextmatrix", "architect.yaml")))
+	require.NoError(t, os.Remove(filepath.Join(e.home, ".config", "systemd", "user", "contextmatrix-architect.service")))
+
+	server, _, err := configsync.LoadFile(serverFile)
+	require.NoError(t, err)
+	configsync.Set(server, "backends.architect", configsync.Tree{"url": "", "api_key": "", "enabled": false, "default_model": ""})
+
+	data, err := configsync.Encode(server, "test")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(serverFile, data, 0o600))
+	require.NoError(t, os.Remove(e.log))
+
+	out, err = e.run("update", "--yes")
+	require.NoError(t, err, out)
+
+	server, _, err = configsync.LoadFile(serverFile)
+	require.NoError(t, err)
+
+	architect, found, err := configsync.LoadFile(filepath.Join(e.home, ".config", "contextmatrix", "architect.yaml"))
+	require.NoError(t, err)
+	require.True(t, found)
+
+	url, _ := configsync.Get(server, "backends.architect.url")
+	enabled, _ := configsync.Get(server, "backends.architect.enabled")
+	serverKey, _ := configsync.Get(server, "backends.architect.api_key")
+	architectKey, _ := configsync.Get(architect, "api_key")
+
+	assert.Equal(t, "http://localhost:19094", url)
+	assert.Equal(t, true, enabled)
+	assert.Equal(t, architectKey, serverKey)
+	assert.Len(t, architectKey, 64)
+
+	log := e.stubLog()
+	assert.Contains(t, log, "make install contextmatrix-architect")
+	assert.Contains(t, log, "systemctl --user restart contextmatrix-architect")
+	assert.Contains(t, log, "systemctl --user restart contextmatrix\n", "the server rereads its backends")
+	assert.NotContains(t, log, "make install contextmatrix-agent", "nothing else moved")
+	assert.FileExists(t, filepath.Join(e.home, ".config", "systemd", "user", "contextmatrix-architect.service"))
+
+	st, _, err = state.Load(stateFile)
+	require.NoError(t, err)
+	assert.NotEmpty(t, st.Repos["contextmatrix-architect"].Commit)
 }

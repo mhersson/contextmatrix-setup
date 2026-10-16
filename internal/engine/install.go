@@ -40,10 +40,14 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		e.logf("services: no usable service manager (%s); start commands are printed instead", reason)
 	}
 
+	e.printSearchNotice()
+
 	st, _, err := state.Load(e.L.StateFile())
 	if err != nil {
 		return err
 	}
+
+	newArchitect := st.Repos[repos.Architect].Commit == ""
 
 	heads, err := e.syncRepos(ctx, repos.Apps)
 	if err != nil {
@@ -100,6 +104,10 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	force := forcedAnswers(a, prefill, trees)
 	results := map[string]configResult{}
 
+	if newArchitect {
+		fillArchitectBlock(force[repos.Server], existing.Server, trees.Server)
+	}
+
 	// A migrated config names the image its old install ran; the one built
 	// here is the only one this install maintains.
 	if facts.AgentImage != "" {
@@ -110,7 +118,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		force[repos.Chat]["base_image"] = facts.ChatImage
 	}
 
-	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat} {
+	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat, repos.Architect: trees.Architect} {
 		res, err := e.writeConfig(ctx, repo, op, force[repo])
 		if err != nil {
 			return err
@@ -131,7 +139,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 	valid := e.validateAll(ctx, results)
 
-	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree) {
+	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
 		e.logf("warning: %s", w)
 	}
 
@@ -149,9 +157,10 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	}
 
 	started := map[string]bool{}
+	hold := map[string]string{}
 
 	if a.Services {
-		if err := e.installUnits(ctx, results[repos.Server].Tree); err != nil {
+		if err := e.installUnits(ctx, mergedTrees(results)); err != nil {
 			return err
 		}
 
@@ -159,7 +168,11 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 			e.enableLinger(ctx)
 		}
 
-		started = e.startEligible(ctx, github, valid)
+		if reason := e.holdNewArchitect(ctx, newArchitect, results[repos.Architect].Tree); reason != "" {
+			hold[repos.Architect] = reason
+		}
+
+		started = e.startEligible(ctx, github, valid, hold)
 	} else {
 		e.printStartCommands()
 	}
@@ -177,8 +190,17 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	}
 
 	for _, repo := range repos.Apps {
+		// A held repo stays unrecorded, so the next update treats it as new
+		// and checks again.
+		if hold[repo] != "" {
+			continue
+		}
+
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}
 	}
+
+	// Repeated last, so the build output above cannot scroll it away.
+	e.printSearchNotice()
 
 	return st.Save(e.L.StateFile())
 }
@@ -226,7 +248,7 @@ func (e *Engine) freshFacts(ctx context.Context, a Answers, existing Trees) (Fac
 // given as a flag would otherwise lose to the carried one. On a fresh
 // install nothing is carried and a difference is always real input.
 func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
-	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}}
+	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}, repos.Architect: {}}
 
 	take := func(repo string, tree configsync.Tree, keys ...string) {
 		for _, k := range keys {
@@ -239,6 +261,7 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 	server := func(keys ...string) { take(repos.Server, trees.Server, keys...) }
 	agent := func(keys ...string) { take(repos.Agent, trees.Agent, keys...) }
 	chat := func(keys ...string) { take(repos.Chat, trees.Chat, keys...) }
+	architect := func(keys ...string) { take(repos.Architect, trees.Architect, keys...) }
 
 	if a.AuthMode != prefill.AuthMode {
 		server("auth.mode")
@@ -248,6 +271,7 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 		server("port")
 		agent("contextmatrix_url", "container_contextmatrix_url")
 		chat("contextmatrix_url", "container_contextmatrix_url")
+		architect("contextmatrix_url")
 	}
 
 	if a.AgentPort != prefill.AgentPort {
@@ -260,9 +284,18 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 		chat("port")
 	}
 
+	if a.ArchitectPort != prefill.ArchitectPort {
+		server("backends.architect.url")
+		architect("port")
+	}
+
 	if a.DefaultModel != prefill.DefaultModel {
 		server("backends.agent.default_model", "backends.chat.default_model")
 		agent("default_model")
+	}
+
+	if a.ArchitectModel != prefill.ArchitectModel {
+		server("backends.architect.default_model")
 	}
 
 	// An unchanged key means the answers still describe the carried
@@ -390,9 +423,9 @@ func (e *Engine) validateAll(ctx context.Context, results map[string]configResul
 	return valid
 }
 
-func (e *Engine) installUnits(ctx context.Context, server configsync.Tree) error {
+func (e *Engine) installUnits(ctx context.Context, trees Trees) error {
 	for _, repo := range repos.Apps {
-		changed, err := e.Services.Install(ctx, e.serviceFor(repo, server))
+		changed, err := e.Services.Install(ctx, e.serviceFor(repo, trees))
 		if err != nil {
 			return fmt.Errorf("install %s unit: %w", repo, err)
 		}
@@ -413,9 +446,10 @@ func (e *Engine) enableLinger(ctx context.Context) {
 }
 
 // startEligible starts what can run and reports what it started: the
-// server only with GitHub configured and a valid file, backends only with
-// docker and a valid file.
-func (e *Engine) startEligible(ctx context.Context, github bool, valid map[string]bool) map[string]bool {
+// server only with GitHub configured and a valid file, the worker backends
+// only with docker and a valid file, the architect with a valid file. A
+// repo in hold is not started, for the reason given.
+func (e *Engine) startEligible(ctx context.Context, github bool, valid map[string]bool, hold map[string]string) map[string]bool {
 	started := map[string]bool{}
 
 	for _, repo := range repos.Apps {
@@ -424,8 +458,10 @@ func (e *Engine) startEligible(ctx context.Context, github bool, valid map[strin
 			e.logf("%-22s not started: config invalid", repo)
 		case repo == repos.Server && !github:
 			e.logf("%-22s not started: fill in the github block of server.yaml, then run update", repo)
-		case repo != repos.Server && !e.Host.Docker:
+		case needsDocker(repo) && !e.Host.Docker:
 			e.logf("%-22s not started: docker not available", repo)
+		case hold[repo] != "":
+			e.logf("%-22s not started: %s", repo, hold[repo])
 		default:
 			if err := e.Services.Start(ctx, repo); err != nil {
 				e.logf("%-22s start failed: %v", repo, err)
@@ -445,6 +481,7 @@ func (e *Engine) printStartCommands() {
 	e.logf("  %s -config %s", e.Host.Binary(repos.Server), e.L.ServerConfig())
 	e.logf("  %s serve --config %s", e.Host.Binary(repos.Agent), e.L.AgentConfig())
 	e.logf("  %s serve --config %s", e.Host.Binary(repos.Chat), e.L.ChatConfig())
+	e.logf("  %s serve --config %s", e.Host.Binary(repos.Architect), e.L.ArchitectConfig())
 }
 
 // linkWatch follows the server log for the one-time admin link in the

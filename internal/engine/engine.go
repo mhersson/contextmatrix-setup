@@ -39,6 +39,8 @@ type Engine struct {
 	Browser  func(ctx context.Context, url string) error
 	Now      func() time.Time
 	RepoURL  func(name string) string
+	// PortFree reports whether a port can be bound; nil uses host.PortFree.
+	PortFree func(port int) bool
 }
 
 func (e *Engine) now() time.Time {
@@ -47,6 +49,14 @@ func (e *Engine) now() time.Time {
 	}
 
 	return time.Now().UTC()
+}
+
+func (e *Engine) portFree(port int) bool {
+	if e.PortFree != nil {
+		return e.PortFree(port)
+	}
+
+	return host.PortFree(port)
 }
 
 func (e *Engine) repoURL(name string) string {
@@ -72,4 +82,10 @@ func (e *Engine) logf(format string, args ...any) {
 
 func binaryFor(repo string) string {
 	return repo
+}
+
+// needsDocker reports whether a repo's service runs its workers in
+// containers. The architect is one process and runs without docker.
+func needsDocker(repo string) bool {
+	return repo == repos.Agent || repo == repos.Chat
 }

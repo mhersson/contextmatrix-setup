@@ -1,12 +1,13 @@
 # contextmatrix-setup
 
-Installs and updates a local ContextMatrix stack (server, agent, chat) on macOS
-and Linux. No root, no sudo. One command in the morning keeps it current.
+Installs and updates a local ContextMatrix stack (server, agent, chat,
+architect) on macOS and Linux. No root, no sudo. One command in the morning
+keeps it current.
 
-The installer is opinionated: high ports (18080, 19092, 19093), every file under
-`~/.contextmatrix`, one config directory, and only the settings a local setup
-needs. Everything else keeps the upstream default; edit the config files by hand
-for the rest, your values are never overwritten.
+The installer is opinionated: high ports (18080, 19092, 19093, 19094), every
+file under `~/.contextmatrix`, one config directory, and only the settings a
+local setup needs. Everything else keeps the upstream default; edit the config
+files by hand for the rest, your values are never overwritten.
 
 ![The install wizard's welcome screen](assets/welcome.png)
 
@@ -16,8 +17,17 @@ for the rest, your values are never overwritten.
 
 git, go (1.27 or newer), make, node and npm (server frontend build). Docker is
 optional: without it the install completes, the worker images are skipped, and
-the backends stay disabled until a later `update` finds docker. The welcome
-screen checks all of these before the first question.
+the agent and chat stay disabled until a later `update` finds docker. The
+architect runs no containers and needs no docker.
+
+ripgrep (`rg`) is needed by the architect's grep tool and is never installed
+by the installer: install it with your package manager
+(`brew install ripgrep`, `apt install ripgrep`, ...). It must be on the
+services' PATH, which is fixed to `$GOBIN:/usr/local/bin:/usr/bin:/bin` (plus
+`/opt/homebrew/bin` on macOS), so an `rg` under `~/.cargo/bin` does not count.
+Without it the install carries on and `install`, `update` and `status` print a
+warning block. The welcome screen checks all of these before the first
+question.
 
 ### Have these ready
 
@@ -28,7 +38,7 @@ first install is a single sitting. Every item also has a flag, see
 | Item                                       | Where to get it                                                                                                                                                                                                                                                                       |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **OpenRouter API key**                     | <https://openrouter.ai/keys>. Every run and chat goes through OpenRouter; the server forwards the key to the workers. Leave it empty to add it to `server.yaml` later, but nothing runs until then.                                                                                   |
-| **Default model**                          | An OpenRouter model slug. The default is `deepseek/deepseek-v4-flash`. Both backends use it; chat cannot start without one.                                                                                                                                                           |
+| **Default model**                          | An OpenRouter model slug. The default is `deepseek/deepseek-v4-flash`. The agent and chat use it; chat cannot start without one. The architect has its own default, `anthropic/claude-sonnet-5.5`; `--architect-model` changes it.                                                    |
 | **GitHub credential**                      | A GitHub App or a personal access token, see below. Without one the server does not start.                                                                                                                                                                                            |
 | **Artificial Analysis API key** (optional) | Create an account at <https://artificialanalysis.ai> (free tier) and generate a key on your account page. Gives the model selector live quality scores.                                                                                                                               |
 | **Boards repo URL** (optional)             | The `https://` URL of a GitHub repo the credential above can push to, for example `https://github.com/you/contextmatrix-boards.git`. Create it empty; the server clones it and pushes the first board. Without a URL the boards live in a local repo under `~/.contextmatrix/boards`. |
@@ -51,7 +61,8 @@ needs only you.
   can create mid-wizard.
 
 The remaining questions (login mode, ports, services) have defaults that suit
-a laptop.
+a laptop. An architect whose port is already taken is installed but not
+started, and the next `update` tries again.
 
 ## Install
 
@@ -76,10 +87,13 @@ first admin account.
 contextmatrix-setup update
 ```
 
-Pulls the four repos, shows what changed, rebuilds what moved, syncs your config
+Pulls the five repos, shows what changed, rebuilds what moved, syncs your config
 files with upstream (new keys added, removed keys dropped with a note, your
 values kept), rebuilds a backend's worker images only when its repo moved, and
-restarts only what changed. `--yes` skips the confirmation.
+restarts only what changed. `--yes` skips the confirmation. An install made
+before the architect gets it at its next `update`: built, configured in
+`architect.yaml` and in `server.yaml`'s `backends.architect` (empty values there
+are filled, as is `enabled: false`; other values you set are kept), and started.
 
 ## Other commands
 
@@ -103,7 +117,7 @@ upstream are never touched.
 
 | Purpose                     | Path                                                                    |
 | --------------------------- | ----------------------------------------------------------------------- |
-| Configs                     | `~/.config/contextmatrix/{server,agent,chat}.yaml`                      |
+| Configs                     | `~/.config/contextmatrix/{server,agent,chat,architect}.yaml`            |
 | State, boards, skills, logs | `~/.contextmatrix/`                                                     |
 | Installer record            | `~/.contextmatrix/setup/state.yaml`                                     |
 | Source cache                | `~/.cache/contextmatrix-setup/src/`                                     |
@@ -111,29 +125,35 @@ upstream are never touched.
 | Units                       | `~/.config/systemd/user/` or `~/Library/LaunchAgents/`                  |
 | Service logs                | `journalctl --user -u contextmatrix` or `~/Library/Logs/contextmatrix/` |
 
+The architect's state (`architect.db`, code checkouts, exports) lives in
+`~/.contextmatrix/architect`.
+
 Units are installer-owned. On Linux, customise with
 `systemctl --user edit <name>`; the installer never touches drop-ins. On macOS
 edit the config file, not the plist. launchd loads every plist in
 `~/Library/LaunchAgents` at login, so a service the installer did not start
-(GitHub skipped, invalid config, no docker) still starts at the next login until
-the cause is fixed and `contextmatrix-setup update` is run.
+(GitHub skipped, invalid config, no docker, architect port taken) still starts
+at the next login until the cause is fixed and `contextmatrix-setup update` is
+run.
 
 ## Worker images
 
-Each backend gets its default worker image, tagged per commit and written to
-`base_image`, plus the `go-node`, `python` and `rust` variants under their
-stable tags (`contextmatrix-agent-worker:go-node`,
+The agent and chat each get their default worker image, tagged per commit and
+written to `base_image`, plus the `go-node`, `python` and `rust` variants under
+their stable tags (`contextmatrix-agent-worker:go-node`,
 `contextmatrix-chat-worker:python`, and so on). A project's
-`remote_execution.worker_image` or `chat_worker_image` can name any of them
-from the project-settings picker, and the name keeps resolving after an update
-because the variant tags move to the rebuilt images. The images a rebuild
-untags are removed; `status` lists what is built. An install made before the
-variants existed builds them at its next `update`.
+`remote_execution.worker_image` or `chat_worker_image` can name any of them from
+the project-settings picker, and the name keeps resolving after an update
+because the variant tags move to the rebuilt images. The images a rebuild untags
+are removed; `status` lists what is built. An install made before the variants
+existed builds them at its next `update`.
 
 ## Config files
 
 The installer manages the key set; you own the values. Each file starts with a
-header saying so and naming the upstream example file that documents every key.
+header saying so and naming the upstream example file that documents every key
+(`config.yaml.example` for the server and the architect, `serve.yaml.example`
+for the agent and chat).
 Comments are not preserved, so keep notes elsewhere. Paths are
 written absolute: the agent and chat do not expand `~`, and the server does so
 only for some keys.
@@ -171,4 +191,6 @@ Run after changes to services or images; CI covers Linux only.
    `kickstart -k` restarted only that agent and the log file under
    `~/Library/Logs/contextmatrix/` continues.
 5. `contextmatrix-setup uninstall`; confirm `launchctl print` no longer lists
-   the three labels and the configs remain.
+   the four labels and the configs remain.
+6. Confirm `~/Library/Logs/contextmatrix/contextmatrix-architect.log` shows the
+   architect listening, and that `contextmatrix-setup status` lists `rg`.

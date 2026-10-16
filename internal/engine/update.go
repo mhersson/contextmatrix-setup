@@ -32,6 +32,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	e.useRecordedManager(st.ServiceManager)
 	unmanaged := e.Services.Kind() == "none"
 
+	e.printSearchNotice()
+
 	heads, err := e.syncRepos(ctx, repos.Apps)
 	if err != nil {
 		return err
@@ -48,6 +50,12 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		}
 
 		moved[repo] = true
+
+		if old == "" {
+			fmt.Fprintf(&summary, "%s new at %s\n", repo, repos.Short(heads[repo]))
+
+			continue
+		}
 
 		log, err := e.Git.Log(ctx, e.L.SrcDir(repo), old, heads[repo])
 		if err != nil {
@@ -91,7 +99,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	facts := Facts{Layout: e.L, Gateway: e.gateway(ctx), Docker: e.Host.Docker, Keys: keys, InstanceID: instanceID}
 
-	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}}
+	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}, repos.Architect: {}}
 	oldTags := map[string]string{}
 	imageChanged := map[string]bool{}
 	buildFailed := map[string]bool{}
@@ -140,7 +148,14 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	configChanged := map[string]bool{}
 	handEdited := map[string]bool{}
 
-	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat} {
+	// An install made before the architect may already carry CM's empty,
+	// disabled architect block, which the merge would keep.
+	newArchitect := st.Repos[repos.Architect].Commit == ""
+	if newArchitect {
+		fillArchitectBlock(force[repos.Server], existing.Server, trees.Server)
+	}
+
+	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat, repos.Architect: trees.Architect} {
 		name := filepath.Base(e.L.ConfigFor(repo))
 
 		if prev, ok := st.Configs[name]; ok {
@@ -192,15 +207,20 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	valid := e.validateAll(ctx, results)
 
-	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree) {
+	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
 		e.logf("warning: %s", w)
 	}
 
 	unitChanged := map[string]bool{}
+	hold := map[string]string{}
 
 	if !unmanaged {
+		if reason := e.holdNewArchitect(ctx, newArchitect, results[repos.Architect].Tree); reason != "" {
+			hold[repos.Architect] = reason
+		}
+
 		for _, repo := range repos.Apps {
-			changed, err := e.Services.Install(ctx, e.serviceFor(repo, results[repos.Server].Tree))
+			changed, err := e.Services.Install(ctx, e.serviceFor(repo, mergedTrees(results)))
 			if err != nil {
 				return err
 			}
@@ -227,8 +247,10 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			e.logf("%-22s not restarted: config invalid", repo)
 		case repo == repos.Server && !github:
 			e.logf("%-22s not started: github block missing in server.yaml", repo)
-		case repo != repos.Server && !e.Host.Docker:
+		case needsDocker(repo) && !e.Host.Docker:
 			e.logf("%-22s not started: docker not available", repo)
+		case hold[repo] != "":
+			e.logf("%-22s not started: %s", repo, hold[repo])
 		case unmanaged:
 			// Nothing to restart, and the old image stays until the user
 			// restarts the process by hand.
@@ -264,13 +286,17 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	for _, repo := range repos.Apps {
 		// A repo whose image did not build stays on its recorded commit, so
-		// the next run sees it as moved again and retries the build.
-		if buildFailed[repo] {
+		// the next run sees it as moved again and retries the build; a held
+		// one stays unrecorded and is checked again.
+		if buildFailed[repo] || hold[repo] != "" {
 			continue
 		}
 
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}
 	}
+
+	// Repeated last, so the build output above cannot scroll it away.
+	e.printSearchNotice()
 
 	return st.Save(e.L.StateFile())
 }
@@ -285,7 +311,12 @@ func (e *Engine) loadTrees() Trees {
 		return t
 	}
 
-	return Trees{Server: load(e.L.ServerConfig()), Agent: load(e.L.AgentConfig()), Chat: load(e.L.ChatConfig())}
+	return Trees{
+		Server:    load(e.L.ServerConfig()),
+		Agent:     load(e.L.AgentConfig()),
+		Chat:      load(e.L.ChatConfig()),
+		Architect: load(e.L.ArchitectConfig()),
+	}
 }
 
 // AnswersFrom rebuilds answers from installed or migrated config trees and
@@ -322,6 +353,9 @@ func AnswersFrom(t Trees) (Answers, Known) {
 	a.ServerPort, server = port(t.Server, "port", a.ServerPort)
 	a.AgentPort, agent = port(t.Agent, "port", a.AgentPort)
 	a.ChatPort, chat = port(t.Chat, "port", a.ChatPort)
+	// An install made before the architect has no architect port; the other
+	// three still describe it, so the default fills in without asking again.
+	a.ArchitectPort, _ = port(t.Architect, "port", a.ArchitectPort)
 	k.Ports = server && agent && chat
 
 	if s := str(t.Server, "auth.mode"); s != "" {
@@ -330,6 +364,10 @@ func AnswersFrom(t Trees) (Answers, Known) {
 
 	if s := str(t.Server, "backends.agent.default_model"); s != "" {
 		a.DefaultModel, k.DefaultModel = s, true
+	}
+
+	if s := str(t.Server, "backends.architect.default_model"); s != "" {
+		a.ArchitectModel = s
 	}
 
 	if s := str(t.Server, "llm_endpoint.api_key"); s != "" {

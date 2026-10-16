@@ -8,15 +8,22 @@ import (
 	"strings"
 )
 
-const DefaultModel = "deepseek/deepseek-v4-flash"
+const (
+	DefaultModel = "deepseek/deepseek-v4-flash"
+	// DefaultArchitectModel is the architect's own default, apart from the
+	// model the agent and chat share.
+	DefaultArchitectModel = "anthropic/claude-sonnet-5.5"
+)
 
 type Answers struct {
 	AuthMode        string
 	ServerPort      int
 	AgentPort       int
 	ChatPort        int
+	ArchitectPort   int
 	OpenRouterKey   string
 	DefaultModel    string
+	ArchitectModel  string
 	GitHubMode      string
 	GitHubPAT       string
 	GitHubAppID     int64
@@ -45,14 +52,16 @@ type Known struct {
 
 func DefaultAnswers() Answers {
 	return Answers{
-		AuthMode:     "multi",
-		ServerPort:   18080,
-		AgentPort:    19092,
-		ChatPort:     19093,
-		DefaultModel: DefaultModel,
-		GitHubMode:   "skip",
-		BoardsName:   "boards",
-		Services:     true,
+		AuthMode:       "multi",
+		ServerPort:     18080,
+		AgentPort:      19092,
+		ChatPort:       19093,
+		ArchitectPort:  19094,
+		DefaultModel:   DefaultModel,
+		ArchitectModel: DefaultArchitectModel,
+		GitHubMode:     "skip",
+		BoardsName:     "boards",
+		Services:       true,
 	}
 }
 
@@ -85,6 +94,10 @@ func (a *Answers) Normalize() {
 	if a.DefaultModel == "" {
 		a.DefaultModel = DefaultModel
 	}
+
+	if a.ArchitectModel == "" {
+		a.ArchitectModel = DefaultArchitectModel
+	}
 }
 
 func (a Answers) Validate() error {
@@ -94,7 +107,7 @@ func (a Answers) Validate() error {
 
 	ports := map[int]string{}
 
-	for name, p := range map[string]int{"server": a.ServerPort, "agent": a.AgentPort, "chat": a.ChatPort} {
+	for name, p := range map[string]int{"server": a.ServerPort, "agent": a.AgentPort, "chat": a.ChatPort, "architect": a.ArchitectPort} {
 		if p < 1024 || p > 65535 {
 			return fmt.Errorf("%s port %d must be between 1024 and 65535", name, p)
 		}

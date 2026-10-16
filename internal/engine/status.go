@@ -104,6 +104,12 @@ func (e *Engine) PrintStatus(s Status) {
 		e.logf("%s", s.DockerHint)
 	}
 
+	if e.Host.Search.RG != "" {
+		e.logf("rg: %s", e.Host.Search.RG)
+	} else {
+		e.printSearchNotice()
+	}
+
 	for family, tag := range s.Images {
 		line := tag
 		if vs := s.Variants[family]; len(vs) > 0 {

@@ -66,6 +66,19 @@ boards:
 	}, known)
 }
 
+func TestAnswersFromReadsTheArchitect(t *testing.T) {
+	server := parseTree(t, "backends:\n  architect:\n    default_model: carried/architect\n")
+
+	a, known := AnswersFrom(Trees{Server: server, Architect: parseTree(t, "port: 9095\n")})
+	assert.Equal(t, 9095, a.ArchitectPort)
+	assert.Equal(t, "carried/architect", a.ArchitectModel)
+	assert.False(t, known.DefaultModel, "the agent and chat model is a separate answer")
+
+	a, _ = AnswersFrom(Trees{Server: parseTree(t, "port: 8080\n")})
+	assert.Equal(t, 19094, a.ArchitectPort, "an install made before the architect gets the default port")
+	assert.Equal(t, DefaultArchitectModel, a.ArchitectModel)
+}
+
 func TestAnswersFromReadsPATMode(t *testing.T) {
 	server := parseTree(t, "github:\n  auth_mode: pat\n  pat:\n    token: ghp_old\n")
 

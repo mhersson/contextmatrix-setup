@@ -16,7 +16,7 @@ func testFacts() Facts {
 		Layout:     layout.New("/home/u", nil),
 		Gateway:    "172.17.0.1",
 		Docker:     true,
-		Keys:       Keys{MCP: "mcp", Agent: "agentkey", Chat: "chatkey"},
+		Keys:       Keys{MCP: "mcp", Agent: "agentkey", Chat: "chatkey", Architect: "architectkey"},
 		InstanceID: "box-abc123",
 		AgentImage: "contextmatrix-agent-worker:abc1234",
 		ChatImage:  "contextmatrix-chat-worker:def5678",
@@ -139,6 +139,26 @@ func TestOpinionatedBackends(t *testing.T) {
 	assert.Equal(t, "/home/u/.contextmatrix/chat/sessions", get(t, tr.Chat, "chat_run_dir"))
 }
 
+func TestOpinionatedArchitect(t *testing.T) {
+	f := testFacts()
+	f.Docker = false
+
+	tr := Opinionated(DefaultAnswers(), f)
+
+	assert.Equal(t, "http://localhost:19094", get(t, tr.Server, "backends.architect.url"))
+	assert.Equal(t, "architectkey", get(t, tr.Server, "backends.architect.api_key"))
+	assert.Equal(t, true, get(t, tr.Server, "backends.architect.enabled"), "the architect needs no docker")
+	assert.Equal(t, DefaultArchitectModel, get(t, tr.Server, "backends.architect.default_model"))
+
+	assert.Equal(t, "http://localhost:18080", get(t, tr.Architect, "contextmatrix_url"))
+	assert.Equal(t, "architectkey", get(t, tr.Architect, "api_key"))
+	assert.Equal(t, 19094, get(t, tr.Architect, "port"))
+	assert.Equal(t, "/home/u/.contextmatrix/architect", get(t, tr.Architect, "state_dir"))
+
+	_, has := configsync.Get(tr.Architect, "mcp_api_key")
+	assert.False(t, has, "CM sends the MCP key per session")
+}
+
 func TestForcedAnswersSwitchesGitHubBlock(t *testing.T) {
 	prefill := DefaultAnswers()
 	prefill.GitHubMode = "skip"
@@ -161,6 +181,7 @@ func TestForcedAnswersSwitchesGitHubBlock(t *testing.T) {
 	assert.Empty(t, server["github.pat.token"], "the server rejects a populated other block")
 	assert.Empty(t, force[repos.Agent])
 	assert.Empty(t, force[repos.Chat])
+	assert.Empty(t, force[repos.Architect])
 
 	_, has := server["port"]
 	assert.False(t, has, "an unchanged answer forces nothing")
@@ -186,14 +207,18 @@ func TestForcedAnswersFollowsEachChangedField(t *testing.T) {
 	prefill.ServerPort = 8080
 	prefill.AgentPort = 9092
 	prefill.ChatPort = 9093
+	prefill.ArchitectPort = 9095
 	prefill.DefaultModel = "old/model"
+	prefill.ArchitectModel = "old/architect"
 	prefill.BoardsName = "old-boards"
 
 	a := DefaultAnswers()
 	a.ServerPort = 28080
 	a.AgentPort = 29092
 	a.ChatPort = 29093
+	a.ArchitectPort = 29094
 	a.DefaultModel = "new/model"
+	a.ArchitectModel = "new/architect"
 	a.OpenRouterKey = "or"
 	a.AAKey = "aa"
 	a.BoardsURL = "https://github.com/org/team.git"
@@ -203,21 +228,23 @@ func TestForcedAnswersFollowsEachChangedField(t *testing.T) {
 	force := forcedAnswers(a, prefill, Opinionated(a, testFacts()))
 
 	assert.Equal(t, map[string]any{
-		"port":                           28080,
-		"backends.agent.url":             "http://localhost:29092",
-		"backends.chat.url":              "http://localhost:29093",
-		"backends.agent.default_model":   "new/model",
-		"backends.chat.default_model":    "new/model",
-		"llm_endpoint.type":              "openrouter",
-		"llm_endpoint.api_key":           "or",
-		"backends.agent.aa_api_key":      "aa",
-		"boards.dir":                     "/home/u/.contextmatrix/boards/team",
-		"boards.git_remote_url":          "https://github.com/org/team.git",
-		"boards.git_clone_on_empty":      true,
-		"boards.git_auto_push":           true,
-		"task_skills.dir":                "/home/u/.contextmatrix/task-skills",
-		"task_skills.git_remote_url":     "https://github.com/org/skills.git",
-		"task_skills.git_clone_on_empty": true,
+		"port":                             28080,
+		"backends.agent.url":               "http://localhost:29092",
+		"backends.chat.url":                "http://localhost:29093",
+		"backends.architect.url":           "http://localhost:29094",
+		"backends.agent.default_model":     "new/model",
+		"backends.chat.default_model":      "new/model",
+		"backends.architect.default_model": "new/architect",
+		"llm_endpoint.type":                "openrouter",
+		"llm_endpoint.api_key":             "or",
+		"backends.agent.aa_api_key":        "aa",
+		"boards.dir":                       "/home/u/.contextmatrix/boards/team",
+		"boards.git_remote_url":            "https://github.com/org/team.git",
+		"boards.git_clone_on_empty":        true,
+		"boards.git_auto_push":             true,
+		"task_skills.dir":                  "/home/u/.contextmatrix/task-skills",
+		"task_skills.git_remote_url":       "https://github.com/org/skills.git",
+		"task_skills.git_clone_on_empty":   true,
 	}, force[repos.Server])
 
 	assert.Equal(t, map[string]any{
@@ -232,6 +259,11 @@ func TestForcedAnswersFollowsEachChangedField(t *testing.T) {
 		"contextmatrix_url":           "http://localhost:28080",
 		"container_contextmatrix_url": "http://172.17.0.1:28080",
 	}, force[repos.Chat])
+
+	assert.Equal(t, map[string]any{
+		"port":              29094,
+		"contextmatrix_url": "http://localhost:28080",
+	}, force[repos.Architect])
 
 	same := DefaultAnswers()
 	same.Normalize()

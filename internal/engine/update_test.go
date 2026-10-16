@@ -60,6 +60,18 @@ func systemctlCalls(h *harness) []string {
 	return out
 }
 
+func starts(h *harness) []string {
+	var out []string
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == "systemctl" && len(c.Args) == 3 && c.Args[1] == "start" {
+			out = append(out, c.Args[2])
+		}
+	}
+
+	return out
+}
+
 func restarts(h *harness) []string {
 	var out []string
 
@@ -259,9 +271,10 @@ func TestStatusAndUninstall(t *testing.T) {
 
 	s, err := h.e.Status(context.Background())
 	require.NoError(t, err)
-	assert.Len(t, s.Repos, 3)
+	assert.Len(t, s.Repos, 4)
 	assert.Equal(t, "aaaaaaa", s.Repos[0].Installed[:7])
 	assert.Equal(t, 18080, s.Ports["contextmatrix"])
+	assert.Equal(t, 19094, s.Ports["contextmatrix-architect"])
 	assert.True(t, s.Docker)
 	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", s.Images["contextmatrix-agent-worker"])
 	assert.Equal(t, []string{"go-node", "python", "rust"}, s.Variants["contextmatrix-chat-worker"])
@@ -273,7 +286,7 @@ func TestStatusAndUninstall(t *testing.T) {
 
 	require.NoError(t, h.e.Uninstall(context.Background()))
 
-	for _, name := range []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"} {
+	for _, name := range []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat", "contextmatrix-architect"} {
 		_, err := os.Stat(h.e.Services.UnitPath(name))
 		assert.True(t, os.IsNotExist(err), name)
 	}
@@ -321,4 +334,139 @@ func TestStatusAndUninstallWithoutServices(t *testing.T) {
 	assert.NotContains(t, h.out.String(), "service removed")
 	assert.Contains(t, h.out.String(), "kept:")
 	assert.Empty(t, systemctlCalls(h))
+}
+
+// preArchitect turns an installed harness into an install made before setup
+// knew the architect, whose server.yaml carries block as the architect
+// entry: CM's schema writes the empty placeholder on a pre-architect update.
+func preArchitect(t *testing.T, h *harness, block configsync.Tree) {
+	t.Helper()
+
+	require.NoError(t, h.e.Services.Remove(context.Background(), repos.Architect))
+	require.NoError(t, os.Remove(h.e.L.ArchitectConfig()))
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+	configsync.Set(server, "backends.architect", block)
+
+	data, err := configsync.Encode(server, referenceFor(repos.Server))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(h.e.L.ServerConfig(), data, 0o600))
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	delete(st.Repos, repos.Architect)
+	delete(st.Configs, "architect.yaml")
+	st.Configs["server.yaml"] = state.ConfigHash{SHA256: configsync.Hash(data)}
+	require.NoError(t, st.Save(h.e.L.StateFile()))
+}
+
+func placeholderBlock() configsync.Tree {
+	return configsync.Tree{"url": "", "api_key": "", "enabled": false, "default_model": ""}
+}
+
+func TestUpdateAddsTheArchitectToAnOlderInstall(t *testing.T) {
+	h := installed(t, true)
+	preArchitect(t, h, placeholderBlock())
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+
+	architect, found, err := configsync.LoadFile(h.e.L.ArchitectConfig())
+	require.NoError(t, err)
+	require.True(t, found)
+
+	assert.Equal(t, "http://localhost:19094", get(t, server, "backends.architect.url"))
+	assert.Equal(t, true, get(t, server, "backends.architect.enabled"))
+	assert.Equal(t, DefaultArchitectModel, get(t, server, "backends.architect.default_model"))
+	assert.Len(t, get(t, architect, "api_key"), 64)
+	assert.Equal(t, get(t, architect, "api_key"), get(t, server, "backends.architect.api_key"), "both ends hold the same fresh key")
+
+	assert.ElementsMatch(t, []string{"contextmatrix", "contextmatrix-architect"}, restarts(h),
+		"the server rereads its backends; the architect starts")
+	assert.FileExists(t, h.e.Services.UnitPath(repos.Architect))
+	assert.Empty(t, h.images.built, "the architect has no image")
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
+}
+
+func TestUpdateKeepsArchitectValuesTheUserSet(t *testing.T) {
+	h := installed(t, true)
+	block := placeholderBlock()
+	block["default_model"] = "my/model"
+	preArchitect(t, h, block)
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "my/model", get(t, server, "backends.architect.default_model"))
+	assert.Equal(t, true, get(t, server, "backends.architect.enabled"))
+}
+
+func TestUpdateHoldsANewArchitectWhosePortIsTaken(t *testing.T) {
+	h := installed(t, true)
+	preArchitect(t, h, placeholderBlock())
+	h.runner.On("systemctl", "--user", "is-active", repos.Architect).Return("inactive\n", "", 3)
+	h.e.PortFree = func(int) bool { return false }
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.NotContains(t, restarts(h), repos.Architect)
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Empty(t, st.Repos[repos.Architect].Commit, "left unrecorded so the next update checks again")
+
+	h.e.PortFree = func(int) bool { return true }
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Contains(t, restarts(h), repos.Architect)
+
+	st, _, err = state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
+}
+
+// A held architect's unit stays enabled, so the init system can start it; its
+// own listener must not hold it again.
+func TestUpdateDoesNotHoldAnArchitectThatIsAlreadyRunning(t *testing.T) {
+	h := installed(t, true)
+	preArchitect(t, h, placeholderBlock())
+	h.runner.On("systemctl", "--user", "is-active", repos.Architect).Return("active\n", "", 0)
+	h.e.PortFree = func(int) bool { return false }
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Contains(t, restarts(h), repos.Architect)
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
+}
+
+// Without docker the agent and chat wait, but the architect runs no
+// containers and still restarts when its repo moves.
+func TestUpdateRestartsAMovedArchitectWithoutDocker(t *testing.T) {
+	h := installed(t, false)
+	h.git.heads[repos.Architect] = "d9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{repos.Architect}, restarts(h))
+}
+
+func TestUpdateIgnoresThePortOfAnInstalledArchitect(t *testing.T) {
+	h := installed(t, true)
+	h.e.PortFree = func(int) bool { return false }
+	h.git.heads[repos.Architect] = "d9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{repos.Architect}, restarts(h), "a running architect holds its own port")
 }

@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	Server = "contextmatrix"
-	Agent  = "contextmatrix-agent"
-	Chat   = "contextmatrix-chat"
+	Server    = "contextmatrix"
+	Agent     = "contextmatrix-agent"
+	Chat      = "contextmatrix-chat"
+	Architect = "contextmatrix-architect"
 )
 
-var All = []string{Server, Agent, Chat}
+var All = []string{Server, Agent, Chat, Architect}
 
 type Service struct {
 	Name           string

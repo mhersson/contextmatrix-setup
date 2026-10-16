@@ -7,9 +7,10 @@ import (
 )
 
 type Keys struct {
-	MCP   string
-	Agent string
-	Chat  string
+	MCP       string
+	Agent     string
+	Chat      string
+	Architect string
 }
 
 func randomHex(n int) (string, error) {
@@ -21,7 +22,7 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// NewKeys generates the three shared secrets: 32 bytes each, hex encoded,
+// NewKeys generates the four shared secrets: 32 bytes each, hex encoded,
 // which satisfies the backends' 32-character minimum with room to spare.
 func NewKeys() (Keys, error) {
 	var k Keys
@@ -37,6 +38,10 @@ func NewKeys() (Keys, error) {
 	}
 
 	if k.Chat, err = randomHex(32); err != nil {
+		return k, err
+	}
+
+	if k.Architect, err = randomHex(32); err != nil {
 		return k, err
 	}
 

@@ -67,6 +67,8 @@ func (l Layout) ServerConfig() string { return filepath.Join(l.ConfigDir, "serve
 func (l Layout) AgentConfig() string  { return filepath.Join(l.ConfigDir, "agent.yaml") }
 func (l Layout) ChatConfig() string   { return filepath.Join(l.ConfigDir, "chat.yaml") }
 
+func (l Layout) ArchitectConfig() string { return filepath.Join(l.ConfigDir, "architect.yaml") }
+
 // ConfigFor maps a service name to its config file; unknown names yield "".
 func (l Layout) ConfigFor(service string) string {
 	switch service {
@@ -76,6 +78,8 @@ func (l Layout) ConfigFor(service string) string {
 		return l.AgentConfig()
 	case "contextmatrix-chat":
 		return l.ChatConfig()
+	case "contextmatrix-architect":
+		return l.ArchitectConfig()
 	default:
 		return ""
 	}
@@ -100,6 +104,8 @@ func (l Layout) AgentLogsDir() string { return filepath.Join(l.StateDir, "agent"
 func (l Layout) ChatSecretsDir() string { return filepath.Join(l.StateDir, "chat", "secrets") }
 
 func (l Layout) ChatSessionsDir() string { return filepath.Join(l.StateDir, "chat", "sessions") }
+
+func (l Layout) ArchitectStateDir() string { return filepath.Join(l.StateDir, "architect") }
 
 func (l Layout) SrcDir(repo string) string { return filepath.Join(l.CacheDir, "src", repo) }
 
@@ -138,6 +144,7 @@ func (l Layout) RuntimeDirs() []string {
 		l.AgentLogsDir(),
 		l.ChatSecretsDir(),
 		l.ChatSessionsDir(),
+		l.ArchitectStateDir(),
 	}
 }
 
