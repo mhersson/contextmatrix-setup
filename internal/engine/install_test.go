@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/services"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
@@ -403,7 +404,7 @@ func TestInstallExpandsTildeInGitHubKeyFile(t *testing.T) {
 
 func TestInstallHoldsTheArchitectWhenItsPortIsTaken(t *testing.T) {
 	h := newHarness(t, true)
-	h.runner.On("systemctl", "--user", "is-active", "contextmatrix-architect").Return("inactive\n", "", 3)
+	h.runner.On("systemctl", "--user", "is-active", repos.Architect).Return("inactive\n", "", 3)
 	h.e.PortFree = func(port int) bool { return port != 19094 }
 
 	a := DefaultAnswers()
@@ -419,4 +420,35 @@ func TestInstallHoldsTheArchitectWhenItsPortIsTaken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, st.Repos["contextmatrix-architect"].Commit)
 	assert.Equal(t, "aaaaaaa1111", st.Repos["contextmatrix"].Commit)
+}
+
+// A server.yaml left by CM's schema already holds an empty, disabled
+// architect block, which the merge would otherwise keep as the user's.
+func TestInstallFillsThePlaceholderArchitectBlock(t *testing.T) {
+	h := newHarness(t, true)
+
+	data, err := configsync.Encode(configsync.Tree{
+		"backends": configsync.Tree{"architect": placeholderBlock()},
+	}, referenceFor(repos.Server))
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(h.e.L.ServerConfig()), 0o755))
+	require.NoError(t, os.WriteFile(h.e.L.ServerConfig(), data, 0o600))
+
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+
+	architect, _, err := configsync.LoadFile(h.e.L.ArchitectConfig())
+	require.NoError(t, err)
+
+	assert.Equal(t, "http://localhost:19094", get(t, server, "backends.architect.url"))
+	assert.Equal(t, true, get(t, server, "backends.architect.enabled"))
+	assert.Len(t, get(t, architect, "api_key"), 64)
+	assert.Equal(t, get(t, architect, "api_key"), get(t, server, "backends.architect.api_key"))
 }

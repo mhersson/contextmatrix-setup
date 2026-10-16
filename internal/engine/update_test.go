@@ -450,6 +450,17 @@ func TestUpdateDoesNotHoldAnArchitectThatIsAlreadyRunning(t *testing.T) {
 	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
 }
 
+// Without docker the agent and chat wait, but the architect runs no
+// containers and still restarts when its repo moves.
+func TestUpdateRestartsAMovedArchitectWithoutDocker(t *testing.T) {
+	h := installed(t, false)
+	h.git.heads[repos.Architect] = "d9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{repos.Architect}, restarts(h))
+}
+
 func TestUpdateIgnoresThePortOfAnInstalledArchitect(t *testing.T) {
 	h := installed(t, true)
 	h.e.PortFree = func(int) bool { return false }
