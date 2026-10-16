@@ -215,7 +215,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	hold := map[string]string{}
 
 	if !unmanaged {
-		if reason := e.holdNewArchitect(newArchitect, results[repos.Architect].Tree); reason != "" {
+		if reason := e.holdNewArchitect(ctx, newArchitect, results[repos.Architect].Tree); reason != "" {
 			hold[repos.Architect] = reason
 		}
 

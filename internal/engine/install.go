@@ -168,7 +168,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 			e.enableLinger(ctx)
 		}
 
-		if reason := e.holdNewArchitect(newArchitect, results[repos.Architect].Tree); reason != "" {
+		if reason := e.holdNewArchitect(ctx, newArchitect, results[repos.Architect].Tree); reason != "" {
 			hold[repos.Architect] = reason
 		}
 

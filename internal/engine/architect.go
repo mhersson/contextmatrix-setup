@@ -1,15 +1,17 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 )
 
 // fillArchitectBlock forces the opinionated architect entry over the empty,
 // disabled block CM's schema puts in server.yaml before the architect is
-// installed: the merge would keep those empty values as the user's. A value
-// the user did set is kept.
+// installed: the merge would keep those empty values as the user's. Empty
+// values and enabled: false are filled; other values the user set are kept.
 func fillArchitectBlock(force map[string]any, user, opinionated configsync.Tree) {
 	for _, k := range []string{
 		"backends.architect.url",
@@ -28,10 +30,15 @@ func fillArchitectBlock(force map[string]any, user, opinionated configsync.Tree)
 }
 
 // holdNewArchitect names why an architect this run adds must not start: its
-// port is taken, so it would only restart in a loop. An installed architect
-// holds its own port, so only a new one is checked.
-func (e *Engine) holdNewArchitect(isNew bool, architect configsync.Tree) string {
+// port is taken, so it would only restart in a loop. Only a new architect is
+// checked, and not one already running: a held unit stays enabled, so the
+// init system can start it, and then the listener on the port is its own.
+func (e *Engine) holdNewArchitect(ctx context.Context, isNew bool, architect configsync.Tree) string {
 	if !isNew {
+		return ""
+	}
+
+	if active, _ := e.Services.Active(ctx, repos.Architect); active {
 		return ""
 	}
 

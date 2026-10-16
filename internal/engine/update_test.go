@@ -411,6 +411,7 @@ func TestUpdateKeepsArchitectValuesTheUserSet(t *testing.T) {
 func TestUpdateHoldsANewArchitectWhosePortIsTaken(t *testing.T) {
 	h := installed(t, true)
 	preArchitect(t, h, placeholderBlock())
+	h.runner.On("systemctl", "--user", "is-active", repos.Architect).Return("inactive\n", "", 3)
 	h.e.PortFree = func(int) bool { return false }
 
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
@@ -428,6 +429,23 @@ func TestUpdateHoldsANewArchitectWhosePortIsTaken(t *testing.T) {
 	assert.Contains(t, restarts(h), repos.Architect)
 
 	st, _, err = state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
+}
+
+// A held architect's unit stays enabled, so the init system can start it; its
+// own listener must not hold it again.
+func TestUpdateDoesNotHoldAnArchitectThatIsAlreadyRunning(t *testing.T) {
+	h := installed(t, true)
+	preArchitect(t, h, placeholderBlock())
+	h.runner.On("systemctl", "--user", "is-active", repos.Architect).Return("active\n", "", 0)
+	h.e.PortFree = func(int) bool { return false }
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Contains(t, restarts(h), repos.Architect)
+
+	st, _, err := state.Load(h.e.L.StateFile())
 	require.NoError(t, err)
 	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
 }

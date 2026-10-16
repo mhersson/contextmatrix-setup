@@ -403,6 +403,7 @@ func TestInstallExpandsTildeInGitHubKeyFile(t *testing.T) {
 
 func TestInstallHoldsTheArchitectWhenItsPortIsTaken(t *testing.T) {
 	h := newHarness(t, true)
+	h.runner.On("systemctl", "--user", "is-active", "contextmatrix-architect").Return("inactive\n", "", 3)
 	h.e.PortFree = func(port int) bool { return port != 19094 }
 
 	a := DefaultAnswers()
