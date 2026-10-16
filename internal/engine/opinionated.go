@@ -28,7 +28,9 @@ type Trees struct {
 
 // Opinionated returns the values the installer writes on a fresh install.
 // Every value here loses to an existing user value in the merge, except
-// base_image, which both flows force after a build.
+// base_image, which both flows force after a build, and the architect
+// block, which the run that adds the architect fills where it is empty
+// (see fillArchitectBlock).
 func Opinionated(a Answers, f Facts) Trees {
 	l := f.Layout
 	serverURL := fmt.Sprintf("http://localhost:%d", a.ServerPort)
@@ -66,6 +68,11 @@ func Opinionated(a Answers, f Facts) Trees {
 	configsync.Set(s, "backends.chat.api_key", f.Keys.Chat)
 	configsync.Set(s, "backends.chat.enabled", f.Docker)
 	configsync.Set(s, "backends.chat.default_model", a.DefaultModel)
+	configsync.Set(s, "backends.architect.url", fmt.Sprintf("http://localhost:%d", a.ArchitectPort))
+	configsync.Set(s, "backends.architect.api_key", f.Keys.Architect)
+	// The architect runs no containers, so docker does not gate it.
+	configsync.Set(s, "backends.architect.enabled", true)
+	configsync.Set(s, "backends.architect.default_model", a.ArchitectModel)
 
 	configsync.Set(s, "auth.mode", a.AuthMode)
 	configsync.Set(s, "auth.master_key_file", filepath.Join(l.ServerStateDir(), "master.key"))
@@ -110,5 +117,13 @@ func Opinionated(a Answers, f Facts) Trees {
 		configsync.Set(ch, "base_image", f.ChatImage)
 	}
 
-	return Trees{Server: s, Agent: ag, Chat: ch}
+	// The architect gets the MCP key from CM per session, and reaches CM
+	// from the host, so it has neither mcp_api_key nor a container URL.
+	ar := configsync.Tree{}
+	configsync.Set(ar, "contextmatrix_url", serverURL)
+	configsync.Set(ar, "api_key", f.Keys.Architect)
+	configsync.Set(ar, "port", a.ArchitectPort)
+	configsync.Set(ar, "state_dir", l.ArchitectStateDir())
+
+	return Trees{Server: s, Agent: ag, Chat: ch, Architect: ar}
 }

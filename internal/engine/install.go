@@ -226,7 +226,7 @@ func (e *Engine) freshFacts(ctx context.Context, a Answers, existing Trees) (Fac
 // given as a flag would otherwise lose to the carried one. On a fresh
 // install nothing is carried and a difference is always real input.
 func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
-	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}}
+	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}, repos.Architect: {}}
 
 	take := func(repo string, tree configsync.Tree, keys ...string) {
 		for _, k := range keys {
@@ -239,6 +239,7 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 	server := func(keys ...string) { take(repos.Server, trees.Server, keys...) }
 	agent := func(keys ...string) { take(repos.Agent, trees.Agent, keys...) }
 	chat := func(keys ...string) { take(repos.Chat, trees.Chat, keys...) }
+	architect := func(keys ...string) { take(repos.Architect, trees.Architect, keys...) }
 
 	if a.AuthMode != prefill.AuthMode {
 		server("auth.mode")
@@ -248,6 +249,7 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 		server("port")
 		agent("contextmatrix_url", "container_contextmatrix_url")
 		chat("contextmatrix_url", "container_contextmatrix_url")
+		architect("contextmatrix_url")
 	}
 
 	if a.AgentPort != prefill.AgentPort {
@@ -260,9 +262,18 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 		chat("port")
 	}
 
+	if a.ArchitectPort != prefill.ArchitectPort {
+		server("backends.architect.url")
+		architect("port")
+	}
+
 	if a.DefaultModel != prefill.DefaultModel {
 		server("backends.agent.default_model", "backends.chat.default_model")
 		agent("default_model")
+	}
+
+	if a.ArchitectModel != prefill.ArchitectModel {
+		server("backends.architect.default_model")
 	}
 
 	// An unchanged key means the answers still describe the carried
