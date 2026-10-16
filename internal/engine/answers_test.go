@@ -13,7 +13,9 @@ func TestDefaultAnswers(t *testing.T) {
 	assert.Equal(t, 18080, a.ServerPort)
 	assert.Equal(t, 19092, a.AgentPort)
 	assert.Equal(t, 19093, a.ChatPort)
+	assert.Equal(t, 19094, a.ArchitectPort)
 	assert.Equal(t, DefaultModel, a.DefaultModel)
+	assert.Equal(t, "anthropic/claude-sonnet-5.5", a.ArchitectModel)
 	assert.Equal(t, "skip", a.GitHubMode)
 	assert.Equal(t, "boards", a.BoardsName)
 	assert.True(t, a.Services)
@@ -45,11 +47,24 @@ func TestNormalizeDerivesBoardsName(t *testing.T) {
 	assert.Equal(t, "my-boards", a.BoardsName)
 }
 
+func TestNormalizeFillsTheArchitectModel(t *testing.T) {
+	a := DefaultAnswers()
+	a.ArchitectModel = ""
+	a.Normalize()
+	assert.Equal(t, DefaultArchitectModel, a.ArchitectModel)
+
+	a.ArchitectModel = "my/model"
+	a.Normalize()
+	assert.Equal(t, "my/model", a.ArchitectModel)
+}
+
 func TestValidateRejectsBadInput(t *testing.T) {
 	cases := map[string]func(*Answers){
 		"auth mode":       func(a *Answers) { a.AuthMode = "single" },
 		"port collision":  func(a *Answers) { a.AgentPort = a.ServerPort },
 		"port too low":    func(a *Answers) { a.ChatPort = 80 },
+		"architect port":  func(a *Answers) { a.ArchitectPort = a.ChatPort },
+		"architect low":   func(a *Answers) { a.ArchitectPort = 443 },
 		"pat without tok": func(a *Answers) { a.GitHubMode = "pat" },
 		"app without ids": func(a *Answers) { a.GitHubMode = "app"; a.GitHubKeyFile = "/k.pem" },
 		"github mode":     func(a *Answers) { a.GitHubMode = "oauth" },

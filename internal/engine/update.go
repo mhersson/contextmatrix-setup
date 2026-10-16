@@ -327,6 +327,9 @@ func AnswersFrom(t Trees) (Answers, Known) {
 	a.ServerPort, server = port(t.Server, "port", a.ServerPort)
 	a.AgentPort, agent = port(t.Agent, "port", a.AgentPort)
 	a.ChatPort, chat = port(t.Chat, "port", a.ChatPort)
+	// An install made before the architect has no architect port; the other
+	// three still describe it, so the default fills in without asking again.
+	a.ArchitectPort, _ = port(t.Architect, "port", a.ArchitectPort)
 	k.Ports = server && agent && chat
 
 	if s := str(t.Server, "auth.mode"); s != "" {
@@ -335,6 +338,10 @@ func AnswersFrom(t Trees) (Answers, Known) {
 
 	if s := str(t.Server, "backends.agent.default_model"); s != "" {
 		a.DefaultModel, k.DefaultModel = s, true
+	}
+
+	if s := str(t.Server, "backends.architect.default_model"); s != "" {
+		a.ArchitectModel = s
 	}
 
 	if s := str(t.Server, "llm_endpoint.api_key"); s != "" {
