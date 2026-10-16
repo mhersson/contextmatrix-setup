@@ -132,7 +132,7 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 }
 
 func referenceFor(repo string) string {
-	if repo == repos.Server {
+	if repo == repos.Server || repo == repos.Architect {
 		return "config.yaml.example in " + repos.URL(repo)
 	}
 
@@ -198,13 +198,24 @@ func fileHash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (e *Engine) serviceFor(repo string, server configsync.Tree) services.Service {
+// mergedTrees collects the files a run just wrote, for the steps that read
+// across them.
+func mergedTrees(results map[string]configResult) Trees {
+	return Trees{
+		Server:    results[repos.Server].Tree,
+		Agent:     results[repos.Agent].Tree,
+		Chat:      results[repos.Chat].Tree,
+		Architect: results[repos.Architect].Tree,
+	}
+}
+
+func (e *Engine) serviceFor(repo string, t Trees) services.Service {
 	bin := e.Host.Binary(binaryFor(repo))
 	env := map[string]string{"HOME": e.L.Home, "PATH": e.Host.ServicePath()}
 
 	// The docker host is a static machine fact, not a per-call decision, so
 	// this lookup does not take the caller's context.
-	if h := e.Images.Host(context.Background()); h != "" && repo != repos.Server {
+	if h := e.Images.Host(context.Background()); h != "" && needsDocker(repo) {
 		env["DOCKER_HOST"] = h
 	}
 
@@ -221,16 +232,33 @@ func (e *Engine) serviceFor(repo string, server configsync.Tree) services.Servic
 	case repos.Server:
 		s.Description = "ContextMatrix server"
 		s.Args = []string{"-config", e.L.ServerConfig()}
-		s.ReadWritePaths = append(s.ReadWritePaths, e.serverPaths(server)...)
+		s.ReadWritePaths = append(s.ReadWritePaths, e.serverPaths(t.Server)...)
 	case repos.Agent:
 		s.Description = "ContextMatrix Agent (task backend)"
 		s.Args = []string{"serve", "--config", e.L.AgentConfig()}
 	case repos.Chat:
 		s.Description = "ContextMatrix Chat (chat backend)"
 		s.Args = []string{"serve", "--config", e.L.ChatConfig()}
+	case repos.Architect:
+		s.Description = "ContextMatrix Architect (blueprint backend)"
+		s.Args = []string{"serve", "--config", e.L.ArchitectConfig()}
+		s.ReadWritePaths = append(s.ReadWritePaths, e.architectPaths(t.Architect)...)
 	}
 
 	return s
+}
+
+// architectPaths lists a state_dir the user moved outside StateDir. The
+// architect expands no ~, so only an absolute value is a path it writes.
+func (e *Engine) architectPaths(architect configsync.Tree) []string {
+	v, _ := configsync.Get(architect, "state_dir")
+
+	s, ok := v.(string)
+	if !ok || !filepath.IsAbs(s) || s == e.L.StateDir || strings.HasPrefix(s, e.L.StateDir+string(filepath.Separator)) {
+		return nil
+	}
+
+	return []string{s}
 }
 
 // serverPaths lists every directory the server writes, expanded from the

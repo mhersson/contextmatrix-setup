@@ -110,7 +110,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		force[repos.Chat]["base_image"] = facts.ChatImage
 	}
 
-	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat} {
+	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat, repos.Architect: trees.Architect} {
 		res, err := e.writeConfig(ctx, repo, op, force[repo])
 		if err != nil {
 			return err
@@ -151,7 +151,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	started := map[string]bool{}
 
 	if a.Services {
-		if err := e.installUnits(ctx, results[repos.Server].Tree); err != nil {
+		if err := e.installUnits(ctx, mergedTrees(results)); err != nil {
 			return err
 		}
 
@@ -401,9 +401,9 @@ func (e *Engine) validateAll(ctx context.Context, results map[string]configResul
 	return valid
 }
 
-func (e *Engine) installUnits(ctx context.Context, server configsync.Tree) error {
+func (e *Engine) installUnits(ctx context.Context, trees Trees) error {
 	for _, repo := range repos.Apps {
-		changed, err := e.Services.Install(ctx, e.serviceFor(repo, server))
+		changed, err := e.Services.Install(ctx, e.serviceFor(repo, trees))
 		if err != nil {
 			return fmt.Errorf("install %s unit: %w", repo, err)
 		}
@@ -424,8 +424,8 @@ func (e *Engine) enableLinger(ctx context.Context) {
 }
 
 // startEligible starts what can run and reports what it started: the
-// server only with GitHub configured and a valid file, backends only with
-// docker and a valid file.
+// server only with GitHub configured and a valid file, the worker backends
+// only with docker and a valid file, the architect with a valid file.
 func (e *Engine) startEligible(ctx context.Context, github bool, valid map[string]bool) map[string]bool {
 	started := map[string]bool{}
 
@@ -435,7 +435,7 @@ func (e *Engine) startEligible(ctx context.Context, github bool, valid map[strin
 			e.logf("%-22s not started: config invalid", repo)
 		case repo == repos.Server && !github:
 			e.logf("%-22s not started: fill in the github block of server.yaml, then run update", repo)
-		case repo != repos.Server && !e.Host.Docker:
+		case needsDocker(repo) && !e.Host.Docker:
 			e.logf("%-22s not started: docker not available", repo)
 		default:
 			if err := e.Services.Start(ctx, repo); err != nil {
@@ -456,6 +456,7 @@ func (e *Engine) printStartCommands() {
 	e.logf("  %s -config %s", e.Host.Binary(repos.Server), e.L.ServerConfig())
 	e.logf("  %s serve --config %s", e.Host.Binary(repos.Agent), e.L.AgentConfig())
 	e.logf("  %s serve --config %s", e.Host.Binary(repos.Chat), e.L.ChatConfig())
+	e.logf("  %s serve --config %s", e.Host.Binary(repos.Architect), e.L.ArchitectConfig())
 }
 
 // linkWatch follows the server log for the one-time admin link in the

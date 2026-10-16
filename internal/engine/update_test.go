@@ -60,6 +60,18 @@ func systemctlCalls(h *harness) []string {
 	return out
 }
 
+func starts(h *harness) []string {
+	var out []string
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == "systemctl" && len(c.Args) == 3 && c.Args[1] == "start" {
+			out = append(out, c.Args[2])
+		}
+	}
+
+	return out
+}
+
 func restarts(h *harness) []string {
 	var out []string
 
@@ -259,9 +271,10 @@ func TestStatusAndUninstall(t *testing.T) {
 
 	s, err := h.e.Status(context.Background())
 	require.NoError(t, err)
-	assert.Len(t, s.Repos, 3)
+	assert.Len(t, s.Repos, 4)
 	assert.Equal(t, "aaaaaaa", s.Repos[0].Installed[:7])
 	assert.Equal(t, 18080, s.Ports["contextmatrix"])
+	assert.Equal(t, 19094, s.Ports["contextmatrix-architect"])
 	assert.True(t, s.Docker)
 	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", s.Images["contextmatrix-agent-worker"])
 	assert.Equal(t, []string{"go-node", "python", "rust"}, s.Variants["contextmatrix-chat-worker"])
@@ -273,7 +286,7 @@ func TestStatusAndUninstall(t *testing.T) {
 
 	require.NoError(t, h.e.Uninstall(context.Background()))
 
-	for _, name := range []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"} {
+	for _, name := range []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat", "contextmatrix-architect"} {
 		_, err := os.Stat(h.e.Services.UnitPath(name))
 		assert.True(t, os.IsNotExist(err), name)
 	}

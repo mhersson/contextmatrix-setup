@@ -26,7 +26,7 @@ func TestInstallFreshWithDocker(t *testing.T) {
 	require.NoError(t, h.e.Install(context.Background(), a))
 
 	// Configs exist, are 0600, carry the header and the merged values.
-	for _, name := range []string{"server.yaml", "agent.yaml", "chat.yaml"} {
+	for _, name := range []string{"server.yaml", "agent.yaml", "chat.yaml", "architect.yaml"} {
 		info, err := os.Stat(filepath.Join(h.e.L.ConfigDir, name))
 		require.NoError(t, err, name)
 		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
@@ -52,6 +52,18 @@ func TestInstallFreshWithDocker(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "contextmatrix-chat-worker:ccccccc", get(t, chat, "base_image"))
 
+	architect, _, err := configsync.LoadFile(h.e.L.ArchitectConfig())
+	require.NoError(t, err)
+	assert.Equal(t, get(t, server, "backends.architect.api_key"), get(t, architect, "api_key"))
+	assert.Len(t, get(t, architect, "api_key"), 64)
+	assert.Equal(t, "http://localhost:19094", get(t, server, "backends.architect.url"))
+	assert.Equal(t, 19094, get(t, architect, "port"))
+	assert.Equal(t, true, get(t, server, "backends.architect.enabled"))
+	assert.Equal(t, DefaultArchitectModel, get(t, server, "backends.architect.default_model"))
+	assert.Equal(t, "http://localhost:18080", get(t, architect, "contextmatrix_url"))
+	assert.Equal(t, h.e.L.ArchitectStateDir(), get(t, architect, "state_dir"))
+	assert.Equal(t, "human:architect", get(t, architect, "caller_identity"), "schema default kept")
+
 	// Runtime dirs, workflow skills, units.
 	for _, d := range h.e.L.RuntimeDirs() {
 		_, err := os.Stat(d)
@@ -61,7 +73,7 @@ func TestInstallFreshWithDocker(t *testing.T) {
 	_, err = os.Stat(filepath.Join(h.e.L.WorkflowSkillsDir(), "create-plan.md"))
 	require.NoError(t, err)
 
-	for _, name := range []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"} {
+	for _, name := range []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat", "contextmatrix-architect"} {
 		_, err := os.Stat(h.e.Services.UnitPath(name))
 		require.NoError(t, err, name)
 	}
@@ -73,6 +85,8 @@ func TestInstallFreshWithDocker(t *testing.T) {
 	assert.Contains(t, string(unit), "-"+h.e.L.StateDir)
 	agentUnit, _ := os.ReadFile(h.e.Services.UnitPath("contextmatrix-agent"))
 	assert.Contains(t, string(agentUnit), "ExecStart="+h.e.Host.GoBin+"/contextmatrix-agent serve --config "+h.e.L.AgentConfig())
+	architectUnit, _ := os.ReadFile(h.e.Services.UnitPath("contextmatrix-architect"))
+	assert.Contains(t, string(architectUnit), "ExecStart="+h.e.Host.GoBin+"/contextmatrix-architect serve --config "+h.e.L.ArchitectConfig())
 
 	// The server installs its frontend dependencies before its binary; a
 	// backend has no frontend and must never see that target.
@@ -94,25 +108,17 @@ func TestInstallFreshWithDocker(t *testing.T) {
 
 	assert.Equal(t, []string{"install-frontend", "install"}, serverMake)
 
-	// Images built for both backends.
+	// Images built for the two worker backends; the architect has none.
 	assert.Equal(t, []string{"contextmatrix-agent-worker:bbbbbbb", "contextmatrix-chat-worker:ccccccc"}, h.images.built)
 
-	// Services started: three starts.
-	starts := 0
-
-	for _, c := range h.runner.Calls() {
-		if c.Name == "systemctl" && len(c.Args) == 3 && c.Args[1] == "start" {
-			starts++
-		}
-	}
-
-	assert.Equal(t, 3, starts)
+	assert.Equal(t, []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat", "contextmatrix-architect"}, starts(h))
 
 	// State written.
 	st, found, err := state.Load(h.e.L.StateFile())
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "aaaaaaa1111", st.Repos["contextmatrix"].Commit)
+	assert.Equal(t, "ddddddd4444", st.Repos["contextmatrix-architect"].Commit)
 	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", st.Images["contextmatrix-agent-worker"].Tag)
 	assert.Equal(t, map[string]string{
 		"go-node": "sha256:bbbbbbb2222-go-node",
@@ -137,13 +143,11 @@ func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, false, get(t, server, "backends.agent.enabled"))
 	assert.Equal(t, false, get(t, server, "backends.chat.enabled"))
+	assert.Equal(t, true, get(t, server, "backends.architect.enabled"))
 	assert.Empty(t, h.images.built)
 
-	for _, c := range h.runner.Calls() {
-		if c.Name == "systemctl" && len(c.Args) == 3 {
-			assert.NotEqual(t, "start", c.Args[1], "nothing is started: server invalid, backends without docker")
-		}
-	}
+	assert.Equal(t, []string{"contextmatrix-architect"}, starts(h),
+		"the server is invalid and the worker backends need docker; the architect needs neither")
 
 	out := h.out.String()
 	assert.Contains(t, out, "github.auth_mode is required")
@@ -228,6 +232,7 @@ func TestInstallNoLinkSeenNamesTheLogCommand(t *testing.T) {
 
 	require.NoError(t, h.e.Install(context.Background(), a))
 	assert.Contains(t, h.out.String(), "grep 'bootstrap link' ~/Library/Logs/contextmatrix/contextmatrix.log")
+	assert.FileExists(t, filepath.Join(h.e.L.LaunchAgentsDir(), "com.github.mhersson.contextmatrix-architect.plist"))
 }
 
 func TestInstallWithoutServiceManagerPrintsStartCommands(t *testing.T) {

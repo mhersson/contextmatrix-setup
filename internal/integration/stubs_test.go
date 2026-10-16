@@ -14,7 +14,7 @@ import (
 )
 
 // env is one isolated machine: HOME, GOBIN, a stub bin dir first on PATH,
-// local bare origins for the four repos, and a log the stubs append to.
+// local bare origins for the five repos, and a log the stubs append to.
 type env struct {
 	t       *testing.T
 	home    string
@@ -115,7 +115,7 @@ exit 0
 	e.writeStub("loginctl", "#!/bin/sh\nexit 0\n")
 	e.writeStub("xdg-open", "#!/bin/sh\necho \"xdg-open $1\" >> \"$STUB_LOG\"\nexit 0\n")
 
-	for _, name := range []string{"contextmatrix-setup", "contextmatrix", "contextmatrix-agent", "contextmatrix-chat"} {
+	for _, name := range []string{"contextmatrix-setup", "contextmatrix", "contextmatrix-agent", "contextmatrix-chat", "contextmatrix-architect"} {
 		e.newOrigin(name)
 	}
 

@@ -73,3 +73,9 @@ func (e *Engine) logf(format string, args ...any) {
 func binaryFor(repo string) string {
 	return repo
 }
+
+// needsDocker reports whether a repo's service runs its workers in
+// containers. The architect is one process and runs without docker.
+func needsDocker(repo string) bool {
+	return repo == repos.Agent || repo == repos.Chat
+}

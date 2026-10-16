@@ -52,12 +52,13 @@ func (g *fakeGit) PathChanged(_ context.Context, _, _, _, path string) (bool, er
 }
 
 type fakeImages struct {
-	built   []string
-	removed []string
-	fail    bool
+	built      []string
+	removed    []string
+	fail       bool
+	dockerHost string
 }
 
-func (fakeImages) Host(context.Context) string { return "" }
+func (f *fakeImages) Host(context.Context) string { return f.dockerHost }
 
 func (fakeImages) BridgeGateway(context.Context) string { return "172.17.0.1" }
 
@@ -134,12 +135,17 @@ func newHarness(t *testing.T, docker bool) *harness {
 	f.On(filepath.Join(gobin, "contextmatrix"), "config", "defaults").Return(fixture(t, "server-defaults.yaml"), "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix-agent"), "config", "defaults").Return(fixture(t, "agent-defaults.yaml"), "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix-chat"), "config", "defaults").Return(fixture(t, "chat-defaults.yaml"), "", 0)
+	f.On(filepath.Join(gobin, "contextmatrix-architect"), "config", "defaults").Return(fixture(t, "architect-defaults.yaml"), "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix"), "config", "validate").Return("ok\n", "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix-agent"), "config", "validate").Return("ok\n", "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix-chat"), "config", "validate").Return("ok\n", "", 0)
+	f.On(filepath.Join(gobin, "contextmatrix-architect"), "config", "validate").Return("ok\n", "", 0)
 
 	git := &fakeGit{
-		heads:   map[string]string{"contextmatrix": "aaaaaaa1111", "contextmatrix-agent": "bbbbbbb2222", "contextmatrix-chat": "ccccccc3333"},
+		heads: map[string]string{
+			"contextmatrix": "aaaaaaa1111", "contextmatrix-agent": "bbbbbbb2222",
+			"contextmatrix-chat": "ccccccc3333", "contextmatrix-architect": "ddddddd4444",
+		},
 		changed: map[string]bool{},
 		logs:    map[string]string{},
 	}

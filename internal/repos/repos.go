@@ -22,7 +22,7 @@ const (
 
 // Apps lists the application repos in install order: the server's config
 // schema must exist before the backends are configured against it.
-var Apps = []string{Server, Agent, Chat}
+var Apps = []string{Server, Agent, Chat, Architect}
 
 func URL(name string) string {
 	return "https://github.com/mhersson/" + name + ".git"

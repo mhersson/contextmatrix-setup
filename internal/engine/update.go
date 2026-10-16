@@ -91,7 +91,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	facts := Facts{Layout: e.L, Gateway: e.gateway(ctx), Docker: e.Host.Docker, Keys: keys, InstanceID: instanceID}
 
-	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}}
+	force := map[string]map[string]any{repos.Server: {}, repos.Agent: {}, repos.Chat: {}, repos.Architect: {}}
 	oldTags := map[string]string{}
 	imageChanged := map[string]bool{}
 	buildFailed := map[string]bool{}
@@ -140,7 +140,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	configChanged := map[string]bool{}
 	handEdited := map[string]bool{}
 
-	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat} {
+	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat, repos.Architect: trees.Architect} {
 		name := filepath.Base(e.L.ConfigFor(repo))
 
 		if prev, ok := st.Configs[name]; ok {
@@ -200,7 +200,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	if !unmanaged {
 		for _, repo := range repos.Apps {
-			changed, err := e.Services.Install(ctx, e.serviceFor(repo, results[repos.Server].Tree))
+			changed, err := e.Services.Install(ctx, e.serviceFor(repo, mergedTrees(results)))
 			if err != nil {
 				return err
 			}
@@ -227,7 +227,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			e.logf("%-22s not restarted: config invalid", repo)
 		case repo == repos.Server && !github:
 			e.logf("%-22s not started: github block missing in server.yaml", repo)
-		case repo != repos.Server && !e.Host.Docker:
+		case needsDocker(repo) && !e.Host.Docker:
 			e.logf("%-22s not started: docker not available", repo)
 		case unmanaged:
 			// Nothing to restart, and the old image stays until the user

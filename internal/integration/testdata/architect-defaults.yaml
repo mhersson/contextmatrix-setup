@@ -1,0 +1,16 @@
+api_key: ""
+caller_identity: human:architect
+contextmatrix_url: ""
+log_level: info
+max_run_cost_usd: 5
+max_turns: 80
+message_dedup_cache_size: 1000
+message_dedup_ttl_seconds: 600
+models: {}
+pack: ""
+port: 9095
+state_dir: /var/lib/contextmatrix-architect
+watch_interval_seconds: 60
+webhook_replay_cache_size: 10000
+webhook_replay_skew_seconds: 330
+workspace_max_age_days: 7

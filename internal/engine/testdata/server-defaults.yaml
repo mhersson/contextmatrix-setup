@@ -33,6 +33,11 @@ backends:
     api_key: ""
     enabled: false
     default_model: ""
+  architect:
+    url: ""
+    api_key: ""
+    enabled: false
+    default_model: ""
 auth:
   mode: multi
   master_key_file: ""

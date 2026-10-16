@@ -23,10 +23,13 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "server.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "agent.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "chat.yaml"))
+	assert.FileExists(t, filepath.Join(e.home, ".config", "contextmatrix", "architect.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".contextmatrix", "setup", "state.yaml"))
 	assert.FileExists(t, filepath.Join(e.home, ".contextmatrix", "workflow-skills", "create-plan.md"))
 	assert.FileExists(t, filepath.Join(e.home, ".config", "systemd", "user", "contextmatrix.service"))
 	assert.FileExists(t, filepath.Join(e.gobin, "contextmatrix-agent"))
+	assert.FileExists(t, filepath.Join(e.gobin, "contextmatrix-architect"))
+	assert.FileExists(t, filepath.Join(e.home, ".config", "systemd", "user", "contextmatrix-architect.service"))
 
 	server := e.read(".config/contextmatrix/server.yaml")
 	assert.Contains(t, server, "port: 18080")
@@ -39,7 +42,8 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.Contains(t, log, "make docker-worker contextmatrix-chat")
 	assert.Contains(t, log, "make docker-worker-variants contextmatrix-agent")
 	assert.Contains(t, log, "make docker-worker-variants contextmatrix-chat")
-	assert.Equal(t, 3, strings.Count(log, "systemctl --user start "))
+	assert.Equal(t, 4, strings.Count(log, "systemctl --user start "))
+	assert.NotContains(t, log, "make docker-worker contextmatrix-architect", "the architect has no image")
 	assert.Contains(t, log, "xdg-open http://localhost:18080/auth/token/stub-token")
 
 	// Nothing moved: quiet.
@@ -62,6 +66,7 @@ func TestInstallUpdateCycle(t *testing.T) {
 	log = e.stubLog()
 	assert.Contains(t, log, "make install contextmatrix-agent")
 	assert.NotContains(t, log, "make install contextmatrix-chat")
+	assert.NotContains(t, log, "make install contextmatrix-architect")
 	assert.NotContains(t, log, "make install-frontend", "only the server has a frontend")
 	assert.Contains(t, log, "make docker-worker contextmatrix-agent")
 	assert.Contains(t, log, "make docker-worker-variants contextmatrix-agent")
@@ -139,7 +144,7 @@ func TestInstallWithoutDocker(t *testing.T) {
 	assert.Contains(t, out, "docker not available")
 	assert.Contains(t, e.read(".config/contextmatrix/server.yaml"), "enabled: false")
 	assert.NotContains(t, e.stubLog(), "docker-worker")
-	assert.Equal(t, 1, strings.Count(e.stubLog(), "systemctl --user start "), "only the server starts")
+	assert.Equal(t, 2, strings.Count(e.stubLog(), "systemctl --user start "), "the server and the architect start; the worker backends need docker")
 }
 
 func TestMigrateFromOldLayout(t *testing.T) {
