@@ -175,6 +175,11 @@ func newHarness(t *testing.T, docker bool) *harness {
 	// search notice out of every other test's output.
 	e.Host.Search = host.SearchTools{RG: "/usr/bin/rg", FD: "/usr/bin/fd"}
 
+	// Every restarted service answers its health check at once unless a
+	// test says otherwise.
+	e.Probe = func(context.Context, string) error { return nil }
+	e.HealthInterval = time.Millisecond
+
 	return &harness{e: e, runner: f, git: git, images: img, out: out, home: home}
 }
 

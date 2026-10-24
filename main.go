@@ -2,16 +2,23 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 
 	"github.com/mhersson/contextmatrix-setup/internal/cli"
+	"github.com/mhersson/contextmatrix-setup/internal/engine"
 )
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		// The update's final line already reported its problems.
+		var pe *engine.ProblemsError
+		if !errors.As(err, &pe) {
+			fmt.Fprintln(os.Stderr, "error:", err)
+		}
+
 		os.Exit(1)
 	}
 }

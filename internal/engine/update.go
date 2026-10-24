@@ -32,6 +32,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		defer c.Close()
 	}
 
+	began := c.Now()
+
 	st, found, err := state.Load(e.L.StateFile())
 	if err != nil {
 		return err
@@ -309,58 +311,69 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	}
 
 	github := githubConfigured(results[repos.Server].Tree)
-	anything := false
-	say := func(format string, args ...any) { c.Println(fmt.Sprintf(format, args...)) }
+
+	var (
+		rows       []serviceResult
+		restarted  = map[string]bool{}
+		restartErr = map[string]error{}
+	)
 
 	for _, repo := range repos.Apps {
 		needs := moved[repo] || configChanged[repo] || handEdited[repo] || imageChanged[repo] || unitChanged[repo]
-		if !needs {
+		if !needs && !buildFailed[repo] {
 			continue
 		}
 
-		anything = true
+		row := serviceResult{Repo: repo, Running: repos.Short(st.Repos[repo].Commit), Image: e.workerImage(st, repo)}
 
 		switch {
 		case buildFailed[repo]:
-			say("%-22s not restarted: image build failed", repo)
+			row.Result, row.Problem, row.Kept = "● kept", true, true
+			row.Note = fmt.Sprintf("keeps running %s: its worker image did not build, so it was not restarted. The next update retries it.", row.Running)
 		case invalid[repo] != nil:
-			say("%-22s not restarted: config invalid", repo)
+			row.Result, row.Problem = "✗ not restarted", true
+			row.Note = "config invalid: " + invalid[repo].Error()
 		case repo == repos.Server && !github:
-			say("%-22s not started: github block missing in server.yaml", repo)
+			row.Result, row.Note = "● not started", "github block missing in server.yaml"
 		case needsDocker(repo) && !e.Host.Docker:
-			say("%-22s not started: docker not available", repo)
+			row.Result, row.Note = "● not started", "docker not available"
 		case hold[repo] != "":
-			say("%-22s not started: %s", repo, hold[repo])
+			row.Result, row.Note = "● not started", hold[repo]
 		case unmanaged:
-			// Nothing to restart, and the old image stays until the user
-			// restarts the process by hand.
-			continue
+			// The old process runs until the user restarts it by hand.
+			row.Result = "start by hand"
 		default:
 			if err := e.Services.Restart(ctx, repo); err != nil {
-				say("%-22s restart failed: %v", repo, err)
-				e.printRecentLogs(ctx, c, repo)
+				restartErr[repo] = err
+				row.Result, row.Problem = "✗ restart failed", true
+				row.Note = strings.TrimSpace(err.Error() + "\n" + e.recentLogs(ctx, repo))
 
-				continue
+				break
 			}
 
-			say("%-22s restarted", repo)
+			restarted[repo] = true
+			row.Result, row.Running = "✓ restarted", repos.Short(heads[repo])
 
 			if old := oldTags[repo]; old != "" && imageChanged[repo] {
 				if err := e.Images.RemoveImage(ctx, old); err != nil {
-					say("%-22s could not remove old image %s: %v", repo, old, err)
+					printNotes(c, note{repo, fmt.Sprintf("could not remove old image %s: %v", old, err)})
 				}
 			}
 		}
+
+		rows = append(rows, row)
 	}
 
-	if anything && unmanaged {
-		for _, line := range e.startCommands() {
-			c.Println(line)
+	e.reportRestarts(ctx, c, rows, restarted, restartErr, results)
+
+	if len(rows) > 0 {
+		c.Println(renderResult(c.Theme(), rows, e.Host.Docker))
+
+		if unmanaged {
+			for _, line := range e.startCommands() {
+				c.Println(line)
+			}
 		}
-	}
-
-	if !anything && len(moved) == 0 {
-		c.Println("up to date")
 	}
 
 	st.Docker = e.Host.Docker
@@ -377,10 +390,127 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		st.Repos[repo] = state.Repo{Commit: heads[repo], InstalledAt: e.now()}
 	}
 
+	if err := st.Save(e.L.StateFile()); err != nil {
+		return err
+	}
+
+	problems := 0
+
+	for _, r := range rows {
+		if r.Problem {
+			problems++
+		}
+	}
+
+	t := c.Theme()
+	took := t.Dim(" in " + ui.Duration(c.Now().Sub(began)))
+
+	switch {
+	case len(rows) == 0:
+		c.Println(" " + t.Good("✓ everything is up to date"))
+	case problems > 0:
+		c.Println("\n " + t.Bad("✗ update finished with "+plural(problems, "problem")) + took)
+	default:
+		c.Println("\n " + t.Good("✓ update finished") + took)
+	}
+
+	if p := c.LogPath(); p != "" {
+		c.Println(" " + t.Dim("log "+p))
+	}
+
 	// Repeated last, so the build output above cannot scroll it away.
 	e.showSearchNotice(c)
 
-	return st.Save(e.L.StateFile())
+	if problems > 0 {
+		return &ProblemsError{N: problems}
+	}
+
+	return nil
+}
+
+// reportRestarts gives every restart attempt its step line in table order.
+// The restarted services are probed together, and each line waits for its
+// own result, so the screen shows which one is still coming up.
+func (e *Engine) reportRestarts(ctx context.Context, c *ui.Console, rows []serviceResult, restarted map[string]bool, restartErr map[string]error, results map[string]configResult) {
+	urls := map[string]string{}
+	health := map[string]healthResult{}
+
+	for repo := range restarted {
+		if e.SkipHealth {
+			health[repo] = healthResult{Reason: "not checked"}
+
+			continue
+		}
+
+		url, err := healthURL(repo, results[repo].Tree)
+		if err != nil {
+			health[repo] = healthResult{Checked: true, Reason: err.Error()}
+
+			continue
+		}
+
+		urls[repo] = url
+	}
+
+	waits := e.startHealth(ctx, urls)
+
+	for i := range rows {
+		r := &rows[i]
+
+		if err := restartErr[r.Repo]; err != nil {
+			c.Start("restart", r.Repo, "").Fail(err.Error())
+
+			continue
+		}
+
+		if !restarted[r.Repo] {
+			continue
+		}
+
+		ch, probing := waits[r.Repo]
+
+		detail := ""
+		if probing {
+			detail = "waiting for health"
+		}
+
+		s := c.Start("restart", r.Repo, detail)
+
+		if probing {
+			health[r.Repo] = <-ch
+		}
+
+		r.Health = health[r.Repo]
+
+		switch h := r.Health; {
+		case h.OK:
+			s.Done("healthy in " + ui.Duration(h.After))
+		case h.Checked:
+			s.Fail(h.Reason)
+
+			r.Problem = true
+
+			if h.Reason != reasonNotRunning {
+				continue
+			}
+
+			if logs := strings.TrimSpace(e.recentLogs(ctx, r.Repo)); logs != "" {
+				r.Note = "recent log:\n" + logs
+			}
+		default:
+			s.Done("restarted")
+		}
+	}
+}
+
+// workerImage is the image a docker-backed service runs, without the
+// contextmatrix- prefix the service column already shows.
+func (e *Engine) workerImage(st *state.State, repo string) string {
+	if !e.Host.Docker || !needsDocker(repo) {
+		return ""
+	}
+
+	return strings.TrimPrefix(st.Images[images.Family(repo)].Tag, "contextmatrix-")
 }
 
 // note is a warning printed indented under the step line it belongs to.
@@ -546,13 +676,14 @@ func integer(tr configsync.Tree, path string) int64 {
 	}
 }
 
-func (e *Engine) printRecentLogs(ctx context.Context, c *ui.Console, repo string) {
+// recentLogs is the tail of a service's log, or "" when it cannot be read.
+func (e *Engine) recentLogs(ctx context.Context, repo string) string {
 	logs, err := e.Services.Logs(ctx, repo, 20)
-	if err != nil || strings.TrimSpace(logs) == "" {
-		return
+	if err != nil {
+		return ""
 	}
 
-	c.Println(logs)
+	return logs
 }
 
 // removeReplacedVariants drops the images a rebuild untagged. Variant tags

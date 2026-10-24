@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
@@ -226,12 +228,16 @@ func TestUpdateKeepsManualEditsAndDropsStaleKeys(t *testing.T) {
 	assert.Equal(t, []string{"contextmatrix"}, restarts(h), "config changed, server restarted")
 }
 
-func TestUpdateFailedImageBuildSkipsRestart(t *testing.T) {
+func TestUpdateFailedImageBuildIsAProblem(t *testing.T) {
 	h := installed(t, true)
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
 	h.images.fail = true
 
-	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 1, pe.N)
 
 	assert.Empty(t, restarts(h))
 	assert.Contains(t, h.out.String(), "image build failed")
@@ -557,12 +563,14 @@ func TestUpdateStepsInPlainOutput(t *testing.T) {
 	done := stepLines(out, "✓")
 
 	assert.NotContains(t, out, "\x1b")
-	assert.Equal(t, []string{"fetch", "build", "images", "config"}, verbs(done))
+	assert.Equal(t, []string{"fetch", "build", "images", "config", "restart", "update"}, verbs(done), "the steps, then the final line")
 	assert.Empty(t, stepLines(out, "✗"))
-	require.Len(t, done, 4)
+	require.Len(t, done, 6)
 	assert.Contains(t, done[1], "contextmatrix-agent", "only the moved repo is built")
 	assert.Contains(t, done[2], "contextmatrix-agent-worker")
 	assert.Contains(t, done[3], "agent.yaml", "the config step names the file the new image changed")
+	assert.Contains(t, done[4], "contextmatrix-agent", "only the moved service restarts")
+	assert.Contains(t, done[4], "healthy")
 }
 
 func TestUpdateBuildFailureShowsStepTail(t *testing.T) {
@@ -600,4 +608,88 @@ func TestUpdateBuildFailureBoxesTheTailInATerminal(t *testing.T) {
 	assert.Contains(t, ansi.Strip(screen.String()), "/logs/update.log")
 	assert.Contains(t, log.String(), "boom")
 	assert.Empty(t, h.out.String(), "everything goes through the console")
+}
+
+func TestUpdateUnhealthyServiceReturnsProblems(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.Probe = refused
+	h.e.HealthBudget = 10 * time.Millisecond
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 1, pe.N)
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "connection refused")
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, "b9999999999", st.Repos["contextmatrix-agent"].Commit, "the new binary is installed whatever its health")
+}
+
+func TestUpdateHealthyRunSucceeds(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	row := resultRow(t, h.out.String(), repos.Agent)
+	assert.Contains(t, row, "restarted")
+	assert.Contains(t, row, "healthy")
+	assert.Contains(t, row, "b999999", "the service now runs the new commit")
+}
+
+// A service that is down after its restart is reported at once, with the
+// lines it logged, instead of waiting out the budget.
+func TestUpdateStoppedServiceShowsItsLogs(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.Services = inactive{h.e.Services}
+	h.e.Probe = refused
+	h.runner.On("journalctl", "--user", "-u", repos.Agent).Return("panic: bad config\n", "", 0)
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "not running")
+
+	out := h.out.String()
+	assert.Greater(t, strings.Index(out, "panic: bad config"), strings.Index(out, "Result"), "the log lines follow the table")
+}
+
+func TestUpdateUnmanagedDoesNotProbe(t *testing.T) {
+	h := declined(t)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.Probe = func(context.Context, string) error {
+		t.Error("an unmanaged service was probed")
+
+		return nil
+	}
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	assert.Contains(t, resultRow(t, out, repos.Agent), "start by hand")
+	assert.Contains(t, out, h.e.L.AgentConfig(), "the start commands still print")
+}
+
+func TestUpdateSkipHealthShowsNotChecked(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.SkipHealth = true
+
+	var calls atomic.Int32
+
+	h.e.Probe = func(context.Context, string) error {
+		calls.Add(1)
+
+		return nil
+	}
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Zero(t, calls.Load())
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "not checked")
 }
