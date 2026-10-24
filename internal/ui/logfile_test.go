@@ -81,3 +81,28 @@ func TestAppendLogAppends(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "parent\nchild\n", string(data))
 }
+
+func TestOpenLogKeepsLogWhenPruneFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+
+	t.Parallel()
+
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "update-20261001-120000.log")
+	require.NoError(t, os.WriteFile(stale, nil, 0o600))
+	// The new log already exists, so it opens in a read-only dir where
+	// nothing can be removed.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "update-20261024-093341.log"), nil, 0o600))
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	f, err := OpenLog(dir, time.Date(2026, 10, 24, 9, 33, 41, 0, time.UTC), 1)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	_, err = f.WriteString("still logging\n")
+	require.NoError(t, err)
+	assert.FileExists(t, stale, "the failed prune left the old log")
+}

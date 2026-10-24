@@ -1,9 +1,7 @@
 package ui
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,11 +22,9 @@ func OpenLog(dir string, now time.Time, keep int) (*os.File, error) {
 		return nil, err
 	}
 
-	if err := pruneLogs(dir, name, keep); err != nil {
-		_ = f.Close()
-
-		return nil, err
-	}
+	// Pruning is housekeeping: a failure keeps old logs but never costs this
+	// run its log.
+	pruneLogs(dir, name, keep)
 
 	return f, nil
 }
@@ -45,10 +41,10 @@ func AppendLog(path string) (*os.File, error) {
 
 // pruneLogs never removes current, so a clock that went backwards cannot
 // delete the log just opened.
-func pruneLogs(dir, current string, keep int) error {
+func pruneLogs(dir, current string, keep int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("list logs: %w", err)
+		return
 	}
 
 	var old []string
@@ -62,10 +58,6 @@ func pruneLogs(dir, current string, keep int) error {
 
 	// ReadDir sorts by name, and the timestamped names sort oldest first.
 	for _, n := range old[:max(len(old)-max(keep-1, 0), 0)] {
-		if err := os.Remove(filepath.Join(dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("prune log: %w", err)
-		}
+		_ = os.Remove(filepath.Join(dir, n))
 	}
-
-	return nil
 }

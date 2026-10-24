@@ -15,8 +15,13 @@ type Theme struct {
 	accent, muted, ok, fail, warn color.Color
 }
 
-// NewTheme builds the palette for m.
+// NewTheme builds the palette for m. A Width of zero or less means the
+// default, since callers may build a Mode without one.
 func NewTheme(m Mode) *Theme {
+	if m.Width <= 0 {
+		m.Width = defaultWidth
+	}
+
 	pick := lipgloss.LightDark(m.Dark)
 
 	return &Theme{

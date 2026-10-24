@@ -106,10 +106,11 @@ func (c *Console) Start(verb, target, detail string) *Step {
 	return s
 }
 
-// Close stops the spinner and is idempotent. A step still running stays
-// drawn as it is, so fail it first to end it cleanly.
+// Close clears any live region and stops the spinner; it is idempotent. A
+// step still running gets no final line, so fail it first to record one.
 func (c *Console) Close() {
 	c.mu.Lock()
+	c.clearLocked()
 	stop, done := c.stop, c.done
 	c.stop, c.done, c.closed = nil, nil, true
 	c.mu.Unlock()
@@ -230,8 +231,13 @@ func (c *Console) lineLocked(s string, toOut bool) {
 }
 
 // drawLocked rewrites the live region in place. It never ends the region
-// with a newline, so the cursor stays on its last row.
+// with a newline, so the cursor stays on its last row. A closed console
+// draws nothing, so a tick that lost the race with Close cannot redraw.
 func (c *Console) drawLocked() {
+	if c.closed {
+		return
+	}
+
 	lines := c.liveLines()
 	if len(lines) < c.drawn {
 		c.clearLocked()

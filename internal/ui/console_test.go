@@ -434,3 +434,66 @@ func TestDuration(t *testing.T) {
 		assert.Equal(t, tt.want, Duration(tt.in), tt.in)
 	}
 }
+
+func TestCloseClearsLiveRegion(t *testing.T) {
+	t.Parallel()
+
+	c, out := liveConsole(t, 100, nil)
+	s := c.Start("build", "contextmatrix", "make install")
+	_, err := io.WriteString(s.Writer(), "compiling module\n")
+	require.NoError(t, err)
+	c.tick()
+	require.Len(t, screen(out.String()), 2)
+
+	c.Close()
+	c.tick() // a tick that lost the race with Close must not redraw
+
+	_, err = io.WriteString(out, "next\n")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"next"}, screen(out.String()), "the next print starts on a clean row")
+}
+
+func TestLiveRedrawReplacesTwoRowRegion(t *testing.T) {
+	t.Parallel()
+
+	c, out := liveConsole(t, 100, nil)
+	s := c.Start("build", "contextmatrix", "make install")
+	w := s.Writer()
+
+	_, err := io.WriteString(w, "first line\n")
+	require.NoError(t, err)
+	c.tick()
+
+	_, err = io.WriteString(w, "second line\n")
+	require.NoError(t, err)
+	c.tick()
+
+	rows := screen(out.String())
+	require.Len(t, rows, 2, "%q", rows)
+	assert.Contains(t, rows[0], "contextmatrix")
+	assert.Contains(t, rows[1], "╰ second line")
+}
+
+func TestMultiLineDetailStaysOneRow(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+
+	c := NewConsole(&out, testTheme(true, true, 100), nil, "")
+	c.Start("fetch", "contextmatrix\n", "origin/main").Fail("exit status 128\nfatal: bad object\n\thint: x")
+
+	lines := plainLines(out.String())
+	require.Len(t, lines, 1, "%q", out.String())
+	assert.Contains(t, lines[0], "exit status 128 fatal: bad object hint: x")
+
+	lc, lo := liveConsole(t, 100, nil)
+	s := lc.Start("build", "contextmatrix", "line one\nline two")
+	_, err := io.WriteString(s.Writer(), "output\n")
+	require.NoError(t, err)
+	lc.tick()
+	lc.tick()
+	require.Len(t, screen(lo.String()), 2, "%q", screen(lo.String()))
+
+	s.Fail("a\nb")
+	assert.Len(t, screen(lo.String()), 1, "%q", screen(lo.String()))
+}

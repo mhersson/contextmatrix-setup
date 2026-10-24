@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -63,4 +64,14 @@ func TestRuleTruncatesLongHeading(t *testing.T) {
 	out := th.Rule("a-very-long-repository-name-indeed", "some/long/path -> another/long/path")
 	assert.Equal(t, 39, lipgloss.Width(out))
 	assert.NotContains(t, out, "\n")
+}
+
+func TestNewThemeDefaultsWidth(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range []int{0, -3} {
+		th := NewTheme(Mode{Plain: true, Width: w})
+		assert.Equal(t, 100, th.Mode().Width, w)
+		assert.NotEmpty(t, th.Output(th.StepLine(Done, "build", "contextmatrix", "ok", time.Second)), w)
+	}
 }

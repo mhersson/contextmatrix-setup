@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type StepState int
@@ -50,7 +52,7 @@ func (t *Theme) spinner(frame int) string {
 
 func (t *Theme) stepRow(glyph string, state StepState, verb, target, detail string, elapsed time.Duration) string {
 	w := t.mode.Width - 1
-	verb, target = Fit(verb, verbWidth-1), Fit(target, targetWidth-1)
+	verb, target, detail = Fit(oneLine(verb), verbWidth-1), Fit(oneLine(target), targetWidth-1), oneLine(detail)
 
 	if detail != "" {
 		switch state {
@@ -79,6 +81,14 @@ func (t *Theme) stepRow(glyph string, state StepState, verb, target, detail stri
 	return Fit(line, w)
 }
 
+// oneLine strips escapes and folds each run of whitespace or control
+// characters to one space, so a multi-line error stays on its row.
+func oneLine(s string) string {
+	return strings.Join(strings.FieldsFunc(ansi.Strip(s), func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}), " ")
+}
+
 // Duration formats an elapsed time as 4.2s, or 1m05s from a minute on.
 func Duration(d time.Duration) string {
 	d = d.Round(100 * time.Millisecond)
@@ -104,7 +114,7 @@ func (t *Theme) FailureBox(title string, tail []string, logPath string) string {
 		}
 	}
 
-	head := " " + t.Bad("✗ "+title)
+	head := " " + t.Bad("✗ "+oneLine(title))
 	if len(rows) > 0 {
 		head += "  " + t.Dim(fmt.Sprintf("last %d lines", len(rows)))
 	}
