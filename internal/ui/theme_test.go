@@ -55,3 +55,12 @@ func TestFitTruncatesWithEllipsis(t *testing.T) {
 	assert.Empty(t, Fit("hi", 0))
 	assert.Equal(t, "hi   ", Pad("hi", 5))
 }
+
+func TestRuleTruncatesLongHeading(t *testing.T) {
+	t.Parallel()
+
+	th := testTheme(true, false, 40)
+	out := th.Rule("a-very-long-repository-name-indeed", "some/long/path -> another/long/path")
+	assert.Equal(t, 39, lipgloss.Width(out))
+	assert.NotContains(t, out, "\n")
+}

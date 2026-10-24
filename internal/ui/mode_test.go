@@ -15,12 +15,12 @@ func TestDetectPlainCases(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		isTerm   bool
-		env      map[string]string
-		wantPlan bool
-		wantTTY  bool
-		wantDark bool
+		name      string
+		isTerm    bool
+		env       map[string]string
+		wantPlain bool
+		wantTTY   bool
+		wantDark  bool
 	}{
 		{"no color", true, map[string]string{"NO_COLOR": "1"}, true, true, true},
 		{"dumb", true, map[string]string{"TERM": "dumb"}, true, true, true},
@@ -33,7 +33,7 @@ func TestDetectPlainCases(t *testing.T) {
 			t.Parallel()
 
 			dark := func() bool {
-				if tt.wantPlan {
+				if tt.wantPlain {
 					t.Fatal("dark queried in plain mode")
 				}
 
@@ -41,7 +41,7 @@ func TestDetectPlainCases(t *testing.T) {
 			}
 			m := detect(func() bool { return tt.isTerm },
 				func() (int, error) { return 80, nil }, dark, env(tt.env))
-			assert.Equal(t, tt.wantPlan, m.Plain)
+			assert.Equal(t, tt.wantPlain, m.Plain)
 			assert.Equal(t, tt.wantTTY, m.TTY)
 			assert.Equal(t, tt.wantDark, m.Dark)
 		})

@@ -33,13 +33,15 @@ func TestBadgeHasFixedWidth(t *testing.T) {
 
 	kinds := []string{
 		"feat", "fix", "docs", "chore", "build", "ci", "test",
-		"refactor", "perf", "revert", "deps", "unknown", "",
+		"refactor", "perf", "revert", "deps", "unknown", "documentation", "",
 	}
 
 	for _, dark := range []bool{true, false} {
 		th := testTheme(dark, false, 80)
 		for _, k := range kinds {
 			assert.Equal(t, BadgeWidth, lipgloss.Width(th.Badge(k)), "%q dark=%v", k, dark)
+			assert.NotContains(t, th.Badge(k), "\n", "%q dark=%v", k, dark)
+			assert.NotContains(t, th.Badge(k), "\n", "%q dark=%v", k, dark)
 		}
 	}
 }

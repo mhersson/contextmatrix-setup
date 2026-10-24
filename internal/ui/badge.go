@@ -61,5 +61,5 @@ func (t *Theme) Badge(kind string) string {
 		Width(BadgeWidth - 1).
 		Align(lipgloss.Center)
 
-	return Pad(st.Render(kind), BadgeWidth)
+	return Pad(st.Render(Fit(kind, BadgeWidth-1)), BadgeWidth)
 }

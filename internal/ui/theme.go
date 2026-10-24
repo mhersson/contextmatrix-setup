@@ -51,19 +51,19 @@ func (t *Theme) Link(text, url string) string {
 	return ansi.SetHyperlink(url) + text + ansi.ResetHyperlink()
 }
 
-// Rule is a section heading: a label, a dimmed detail and a rule filling Width-1.
+// Rule is a section heading: a label, a dimmed detail and a rule filling
+// Width-1. An over-long heading is truncated to keep the rule on the row.
 func (t *Theme) Rule(label, detail string) string {
-	head := "── " + t.Bold(label)
+	body := t.Bold(label)
 	if detail != "" {
-		head += "  " + t.Dim(detail)
+		body += "  " + t.Dim(detail)
 	}
 
-	fill := t.mode.Width - 1 - lipgloss.Width(head) - 1
-	if fill < 2 {
-		fill = 2
-	}
+	// 3 for the leading rule, 1 for the gap, 2 minimum trailing rule.
+	body = Fit(body, t.mode.Width-1-3-1-2)
+	fill := max(t.mode.Width-1-3-lipgloss.Width(body)-1, 2)
 
-	return t.Dim("── ") + strings.TrimPrefix(head, "── ") + " " + t.Dim(strings.Repeat("─", fill))
+	return t.Dim("── ") + body + " " + t.Dim(strings.Repeat("─", fill))
 }
 
 // Fit truncates a styled string to w cells.
