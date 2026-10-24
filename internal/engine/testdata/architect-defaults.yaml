@@ -9,6 +9,8 @@ message_dedup_ttl_seconds: 600
 models: {}
 pack: ""
 port: 9095
+reasoning_effort: ""
+replay_reasoning: true
 state_dir: ""
 watch_interval_seconds: 60
 webhook_replay_cache_size: 10000
