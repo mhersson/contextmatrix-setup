@@ -1,10 +1,11 @@
 package cli
 
 import (
-	"errors"
+	"bufio"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -48,7 +49,7 @@ func newUpdateCmd() *cobra.Command {
 			defer closeConsole()
 
 			if os.Getenv(selfupdate.EnvMarker) == "" {
-				c.Println(c.Theme().Brand(" ContextMatrix setup") + c.Theme().Dim(" · update"))
+				c.Println(c.Theme().Brand(" ContextMatrix setup") + c.Theme().Dim(" · update") + "\n")
 			}
 
 			if !noSelf {
@@ -112,7 +113,13 @@ func newUpdateConsole(out io.Writer, m ui.Mode, l layout.Layout, getenv func(str
 		err error
 	)
 
-	path := getenv(logEnv)
+	// Only the re-exec child appends: a log path exported by hand would
+	// otherwise grow forever and escape pruning.
+	path := ""
+	if getenv(selfupdate.EnvMarker) != "" {
+		path = getenv(logEnv)
+	}
+
 	if path != "" {
 		f, err = ui.AppendLog(path)
 	} else {
@@ -142,18 +149,24 @@ func newUpdateConsole(out io.Writer, m ui.Mode, l layout.Layout, getenv func(str
 
 const logEnv = "CONTEXTMATRIX_SETUP_LOG"
 
-// updateConfirm asks the update question on the console; an empty or
-// unreadable answer means yes.
+// updateConfirm asks the update question on the console. Enter, y and yes
+// apply; any other answer declines; a closed input applies, as install does.
 func updateConfirm(c *ui.Console, in io.Reader) func(string) bool {
+	r := bufio.NewReader(in)
+
 	return func(string) bool {
 		c.Prompt(" " + c.Theme().Accent("?") + " Apply these updates? [Y/n] ")
 
-		var answer string
-
-		if _, err := fmt.Fscanln(in, &answer); err != nil && !errors.Is(err, os.ErrClosed) {
+		line, err := r.ReadString('\n')
+		if err != nil && line == "" {
 			return true
 		}
 
-		return answer == "" || answer == "y" || answer == "Y"
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "", "y", "yes":
+			return true
+		}
+
+		return false
 	}
 }

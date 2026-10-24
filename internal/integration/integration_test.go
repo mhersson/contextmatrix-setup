@@ -304,10 +304,12 @@ func TestUpdatePlainOutputHasNoEscapes(t *testing.T) {
 
 	e.commit("contextmatrix-agent", "x.go", "package x\n")
 
-	out, err = e.run("update", "--yes")
+	out, err = e.runWith([]string{"NO_COLOR=1", "CONTEXTMATRIX_SETUP_REEXEC="}, "update", "--yes", "--no-self-update")
 	require.NoError(t, err, out)
 
 	assert.NotContains(t, out, "\x1b")
+	assert.Contains(t, out, "change x.go", "the changes view lists the new commit")
 	assert.Contains(t, out, "fetch")
 	assert.Contains(t, out, "restart")
+	assert.Equal(t, 1, strings.Count(out, "ContextMatrix setup"), "one header")
 }

@@ -195,6 +195,11 @@ func (e *env) commit(name, file, content string) string {
 }
 
 func (e *env) run(args ...string) (string, error) {
+	return e.runWith(nil, args...)
+}
+
+// runWith appends extra KEY=VALUE entries, which win over the defaults.
+func (e *env) runWith(extra []string, args ...string) (string, error) {
 	// The binary under test is built by this test into its own temp dir.
 	cmd := exec.Command(e.setup, args...) //nolint:gosec
 	cmd.Env = []string{
@@ -204,13 +209,13 @@ func (e *env) run(args ...string) (string, error) {
 		"STUB_LOG=" + e.log,
 		"CONTEXTMATRIX_SETUP_REPO_BASE=" + e.origins,
 		"CONTEXTMATRIX_SETUP_REEXEC=1",
-		"NO_COLOR=1",
 		// Nothing listens on the stub apps' ports; a probe would reach
 		// whatever else does.
 		"CONTEXTMATRIX_SETUP_HEALTH_BUDGET=0",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",
 	}
+	cmd.Env = append(cmd.Env, extra...)
 
 	out, err := cmd.CombinedOutput()
 
