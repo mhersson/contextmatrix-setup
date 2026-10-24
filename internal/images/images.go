@@ -26,10 +26,10 @@ func Tag(repo, commit string) string {
 	return Family(repo) + ":" + repos.Short(commit)
 }
 
-// Variants are the slim targets both backend Makefiles build next to the
-// default image. Their tags are stable, so a project's worker_image override
-// keeps resolving after an update.
-var Variants = []string{"go-node", "python", "rust"}
+// Variants mirrors the docker-worker-variants loop in both backend
+// Makefiles; a target missing here is built but never recorded or removed.
+// Stable tags keep a project's worker_image override resolving.
+var Variants = []string{"go-node", "python", "rust", "jvm-node"}
 
 func VariantTag(repo, variant string) string {
 	return Family(repo) + ":" + variant

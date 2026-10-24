@@ -122,11 +122,12 @@ func TestInstallFreshWithDocker(t *testing.T) {
 	assert.Equal(t, "ddddddd4444", st.Repos["contextmatrix-architect"].Commit)
 	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", st.Images["contextmatrix-agent-worker"].Tag)
 	assert.Equal(t, map[string]string{
-		"go-node": "sha256:bbbbbbb2222-go-node",
-		"python":  "sha256:bbbbbbb2222-python",
-		"rust":    "sha256:rust-static",
+		"go-node":  "sha256:bbbbbbb2222-go-node",
+		"python":   "sha256:bbbbbbb2222-python",
+		"rust":     "sha256:rust-static",
+		"jvm-node": "sha256:bbbbbbb2222-jvm-node",
 	}, st.Images["contextmatrix-agent-worker"].Variants)
-	assert.Len(t, st.Images["contextmatrix-chat-worker"].Variants, 3)
+	assert.Len(t, st.Images["contextmatrix-chat-worker"].Variants, 4)
 	assert.True(t, st.Docker)
 	assert.Equal(t, "systemd", st.ServiceManager)
 	assert.NotEmpty(t, st.Configs["server.yaml"].SHA256)

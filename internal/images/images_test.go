@@ -35,8 +35,7 @@ func TestHostAndGateway(t *testing.T) {
 	assert.Equal(t, "172.17.0.1", d.BridgeGateway(context.Background()))
 }
 
-func TestVariants(t *testing.T) {
-	assert.Equal(t, []string{"go-node", "python", "rust"}, Variants)
+func TestVariantTag(t *testing.T) {
 	assert.Equal(t, "contextmatrix-chat-worker:python", VariantTag("contextmatrix-chat", "python"))
 }
 
@@ -49,6 +48,7 @@ func TestBuildTagsAndInspects(t *testing.T) {
 	f.On("docker", "image", "inspect", "--format", "{{.Id}}", "contextmatrix-agent-worker:go-node").Return("sha256:g0\n", "", 0)
 	f.On("docker", "image", "inspect", "--format", "{{.Id}}", "contextmatrix-agent-worker:python").Return("sha256:py\n", "", 0)
 	f.On("docker", "image", "inspect", "--format", "{{.Id}}", "contextmatrix-agent-worker:rust").Return("sha256:rs\n", "", 0)
+	f.On("docker", "image", "inspect", "--format", "{{.Id}}", "contextmatrix-agent-worker:jvm-node").Return("sha256:jv\n", "", 0)
 
 	var out bytes.Buffer
 
@@ -56,12 +56,12 @@ func TestBuildTagsAndInspects(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "contextmatrix-agent-worker:abc1234", b.Tag)
 	assert.Equal(t, "sha256:feedface", b.ID)
-	assert.Equal(t, map[string]string{"go-node": "sha256:g0", "python": "sha256:py", "rust": "sha256:rs"}, b.Variants)
+	assert.Equal(t, map[string]string{"go-node": "sha256:g0", "python": "sha256:py", "rust": "sha256:rs", "jvm-node": "sha256:jv"}, b.Variants)
 	assert.Contains(t, out.String(), "Successfully built")
 	assert.Contains(t, out.String(), "variants built")
 
 	calls := f.Calls()
-	require.Len(t, calls, 7)
+	require.Len(t, calls, 8)
 	assert.Equal(t, "/cache/src/contextmatrix-agent", calls[0].Dir)
 	assert.Equal(t, []string{"docker-worker"}, calls[0].Args)
 	assert.Equal(t, "/cache/src/contextmatrix-agent", calls[1].Dir)

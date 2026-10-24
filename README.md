@@ -139,14 +139,16 @@ run.
 ## Worker images
 
 The agent and chat each get their default worker image, tagged per commit and
-written to `base_image`, plus the `go-node`, `python` and `rust` variants under
-their stable tags (`contextmatrix-agent-worker:go-node`,
+written to `base_image`, plus the `go-node`, `python`, `rust` and `jvm-node`
+variants under their stable tags (`contextmatrix-agent-worker:go-node`,
 `contextmatrix-chat-worker:python`, and so on). A project's
 `remote_execution.worker_image` or `chat_worker_image` can name any of them from
 the project-settings picker, and the name keeps resolving after an update
 because the variant tags move to the rebuilt images. The images a rebuild untags
 are removed; `status` lists what is built. An install made before the variants
-existed builds them at its next `update`.
+existed builds them at its next `update`; one that recorded only some of them
+records the rest at the repo's next image build. Until then `status` omits them,
+and that build leaves the unrecorded images it replaces in place.
 
 ## Config files
 
