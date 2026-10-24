@@ -337,7 +337,13 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			continue
 		}
 
-		row := serviceResult{Repo: repo, Running: repos.Short(st.Repos[repo].Commit), Image: e.workerImage(st, repo)}
+		// A new image runs only once the service restarts onto it.
+		tag := st.Images[images.Family(repo)].Tag
+		if imageChanged[repo] {
+			tag = oldTags[repo]
+		}
+
+		row := serviceResult{Repo: repo, Running: repos.Short(st.Repos[repo].Commit), Image: e.workerImage(repo, tag)}
 
 		switch {
 		case buildFailed[repo] && oldTags[repo] == "":
@@ -370,6 +376,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	e.restartServices(ctx, c, rows, restart, results, func(r *serviceResult) {
 		r.Running = repos.Short(heads[r.Repo])
+		r.Image = e.workerImage(r.Repo, st.Images[images.Family(r.Repo)].Tag)
 
 		if old := oldTags[r.Repo]; old != "" && imageChanged[r.Repo] {
 			if err := e.Images.RemoveImage(ctx, old); err != nil {
@@ -584,14 +591,14 @@ func (e *Engine) restartInOrder(ctx context.Context, order []string, urls map[st
 	return out
 }
 
-// workerImage is the image a docker-backed service runs, without the
+// workerImage shows a docker-backed service's image tag without the
 // contextmatrix- prefix the service column already shows.
-func (e *Engine) workerImage(st *state.State, repo string) string {
+func (e *Engine) workerImage(repo, tag string) string {
 	if !e.Host.Docker || !needsDocker(repo) {
 		return ""
 	}
 
-	return strings.TrimPrefix(st.Images[images.Family(repo)].Tag, "contextmatrix-")
+	return strings.TrimPrefix(tag, "contextmatrix-")
 }
 
 // note is a warning printed indented under the step line it belongs to.

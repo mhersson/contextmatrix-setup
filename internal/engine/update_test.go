@@ -639,6 +639,24 @@ func TestUpdateHealthyRunSucceeds(t *testing.T) {
 	assert.Contains(t, row, "restarted")
 	assert.Contains(t, row, "healthy")
 	assert.Contains(t, row, "b999999", "the service now runs the new commit")
+	assert.Contains(t, row, "agent-worker:b999999", "and the new worker image")
+}
+
+func TestUpdateFailedRestartShowsTheOldWorkerImage(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.runner.On("systemctl", "--user", "restart", repos.Agent).Return("", "unit failed", 1)
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+
+	row := resultRow(t, h.out.String(), repos.Agent)
+	assert.Contains(t, row, "restart failed")
+	assert.Contains(t, row, "agent-worker:bbbbbbb", "the image built but the service never restarted onto it")
+	assert.NotContains(t, row, "b999999")
+	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
 }
 
 // A service that is down after its restart is reported at once, with the
