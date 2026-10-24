@@ -8,6 +8,7 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/selfupdate"
+	"github.com/mhersson/contextmatrix-setup/internal/ui"
 )
 
 func newUpdateCmd() *cobra.Command {
@@ -25,8 +26,11 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 
+			c := ui.NewConsole(e.Out, ui.NewTheme(ui.Mode{Plain: true, Width: 100}), nil, "")
+			defer c.Close()
+
 			if !noSelf {
-				opts := selfupdate.Options{L: e.L, R: e.R, Git: e.Git, Out: e.Out, Args: os.Args}
+				opts := selfupdate.Options{L: e.L, R: e.R, Git: e.Git, Out: e.Out, UI: c, Args: os.Args}
 
 				// A repo base override applies to the installer's own repo too.
 				if e.RepoURL != nil {
@@ -38,7 +42,7 @@ func newUpdateCmd() *cobra.Command {
 				}
 			}
 
-			return e.Update(ctx, engine.UpdateOptions{Yes: yes, Confirm: confirmPrompt(cmd)})
+			return e.Update(ctx, engine.UpdateOptions{Yes: yes, Confirm: confirmPrompt(cmd), UI: c})
 		},
 	}
 

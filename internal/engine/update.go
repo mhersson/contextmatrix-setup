@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,9 +20,18 @@ import (
 type UpdateOptions struct {
 	Yes     bool
 	Confirm func(summary string) bool
+	// UI renders the run. Nil means a plain console on Out that Update
+	// creates and closes itself.
+	UI *ui.Console
 }
 
 func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
+	c := opts.UI
+	if c == nil {
+		c = ui.NewConsole(e.Out, ui.NewTheme(ui.Mode{Plain: true, Width: 100}), nil, "")
+		defer c.Close()
+	}
+
 	st, found, err := state.Load(e.L.StateFile())
 	if err != nil {
 		return err
@@ -34,12 +44,19 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	e.useRecordedManager(st.ServiceManager)
 	unmanaged := e.Services.Kind() == "none"
 
-	e.printSearchNotice()
+	e.showSearchNotice(c)
 
-	heads, err := e.syncRepos(ctx, repos.Apps)
+	fetch := c.Start("fetch", plural(len(repos.Apps), "app repo"), "origin/main")
+
+	heads, err := e.syncRepos(ctx, repos.Apps, fetch.Writer())
 	if err != nil {
+		fetch.Fail(err.Error())
+		showFailure(c, fetch, "fetch failed")
+
 		return err
 	}
+
+	fetch.Done("origin/main")
 
 	moved := map[string]bool{}
 
@@ -69,27 +86,42 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	}
 
 	if len(moved) > 0 {
-		view := renderChanges(ui.NewTheme(ui.Mode{Plain: true, Width: 100}), list)
-		e.logf("%s", view)
+		view := renderChanges(c.Theme(), list)
+		c.Println(view)
 
 		if !opts.Yes && opts.Confirm != nil && !opts.Confirm(ansi.Strip(view)) {
-			e.logf("update cancelled; nothing changed")
+			c.Println("update cancelled; nothing changed")
 
 			return nil
 		}
 	}
 
 	for _, repo := range repos.Apps {
-		if moved[repo] {
-			if err := e.buildBinary(ctx, repo); err != nil {
-				return err
-			}
+		if !moved[repo] {
+			continue
 		}
+
+		s := c.Start("build", repo, "make install")
+
+		if err := e.buildBinary(ctx, repo, s.Writer(), nil); err != nil {
+			// The target already names the repo the wrapped error repeats.
+			cause := err
+			if inner := errors.Unwrap(err); inner != nil {
+				cause = inner
+			}
+
+			s.Fail(cause.Error())
+			showFailure(c, s, repo+" build failed")
+
+			return err
+		}
+
+		s.Done(repos.Short(heads[repo]))
 	}
 
 	dockerAppeared := !st.Docker && e.Host.Docker
 	if dockerAppeared {
-		e.logf("docker found: building worker images and enabling the backends")
+		printNotes(c, note{"docker found", "building worker images and enabling the backends"})
 	}
 
 	// Existing values feed the opinionated tree so nothing is regenerated.
@@ -120,25 +152,33 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 				continue
 			}
 
+			var notes []note
 			if missingVariants && !moved[repo] {
-				e.logf("%-22s variant images missing: building", repo)
+				notes = append(notes, note{repo, "variant images missing: built at the recorded commit"})
 			}
 
 			oldTags[repo] = old.Tag
 
-			b, err := e.Images.Build(ctx, e.L.SrcDir(repo), repo, heads[repo], e.Out)
+			s := c.Start("images", family, fmt.Sprintf("docker build · default + %d variants", len(images.Variants)))
+
+			b, err := e.Images.Build(ctx, e.L.SrcDir(repo), repo, heads[repo], s.Writer())
 			if err != nil {
-				e.logf("%-22s image build failed, keeping %s: %v", repo, oldTags[repo], err)
+				s.Fail("docker build failed")
+				showFailure(c, s, family+" build failed")
+				printNotes(c, append(notes, note{repo, fmt.Sprintf("image build failed, keeping %s: %v", oldTags[repo], err)})...)
 
 				buildFailed[repo] = true
 
 				continue
 			}
 
+			s.Done(builtImages(heads[repo], b))
+			printNotes(c, notes...)
+
 			st.Images[family] = state.Image{Tag: b.Tag, ID: b.ID, Variants: b.Variants}
 			force[repo]["base_image"] = b.Tag
 			imageChanged[repo] = b.Tag != oldTags[repo]
-			e.removeReplacedVariants(ctx, repo, old.Variants, b.Variants)
+			e.removeReplacedVariants(ctx, c, repo, old.Variants, b.Variants)
 		}
 	}
 
@@ -148,6 +188,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	}
 
 	trees := Opinionated(answers, facts)
+	opinionated := map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat, repos.Architect: trees.Architect}
 	results := map[string]configResult{}
 	configChanged := map[string]bool{}
 	handEdited := map[string]bool{}
@@ -159,7 +200,14 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		fillArchitectBlock(force[repos.Server], existing.Server, trees.Server)
 	}
 
-	for repo, op := range map[string]configsync.Tree{repos.Server: trees.Server, repos.Agent: trees.Agent, repos.Chat: trees.Chat, repos.Architect: trees.Architect} {
+	cfg := c.Start("config", plural(len(repos.Apps), "file"), "")
+
+	var (
+		notes   []note
+		written []string
+	)
+
+	for _, repo := range repos.Apps {
 		name := filepath.Base(e.L.ConfigFor(repo))
 
 		if prev, ok := st.Configs[name]; ok {
@@ -167,15 +215,21 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			// already on disk, so only this hash reveals that the running
 			// service is out of date with its file.
 			if data, err := os.ReadFile(e.L.ConfigFor(repo)); err == nil && configsync.Hash(data) != prev.SHA256 {
-				e.logf("%-22s edited by hand since the last run; values kept", name)
-
+				notes = append(notes, note{name, "edited by hand since the last run; values kept"})
 				handEdited[repo] = true
 			}
 		}
 
-		res, err := e.writeConfig(ctx, repo, op, force[repo])
+		res, err := e.writeConfig(ctx, repo, opinionated[repo], force[repo])
 		if err != nil {
+			cfg.Fail(err.Error())
+			printNotes(c, notes...)
+
 			return err
+		}
+
+		for _, d := range res.Dropped {
+			notes = append(notes, note{name, droppedText(d)})
 		}
 
 		results[repo] = res
@@ -183,9 +237,29 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		st.Configs[name] = state.ConfigHash{SHA256: res.Hash}
 
 		if res.Changed {
-			e.logf("%-22s updated", name)
+			written = append(written, name)
 		}
 	}
+
+	invalid := e.validateAll(ctx, results)
+
+	for _, repo := range repos.Apps {
+		if err := invalid[repo]; err != nil {
+			notes = append(notes, note{filepath.Base(results[repo].Path), "invalid: " + err.Error()})
+		}
+	}
+
+	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
+		notes = append(notes, note{"warning", w})
+	}
+
+	if len(written) == 0 {
+		cfg.Done("in sync")
+	} else {
+		cfg.Done(strings.Join(written, ", "))
+	}
+
+	printNotes(c, notes...)
 
 	if moved[repos.Server] {
 		changed, err := e.Git.PathChanged(ctx, e.L.SrcDir(repos.Server), st.Repos[repos.Server].Commit, heads[repos.Server], "workflow-skills")
@@ -194,25 +268,26 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		}
 
 		if changed {
+			s := c.Start("skills", "workflow-skills", "")
+
 			files, skipped, err := e.copyWorkflowSkills(st.WorkflowSkills.Files)
 			if err != nil {
-				return err
-			}
+				s.Fail(err.Error())
 
-			for _, s := range skipped {
-				e.logf("%-22s %s locally modified, not overwritten", "workflow-skills", s)
+				return err
 			}
 
 			st.WorkflowSkills = state.WorkflowSkills{Commit: heads[repos.Server], Files: files}
 
-			e.logf("%-22s updated", "workflow-skills")
+			s.Done(plural(len(files)-len(skipped), "file") + " copied")
+
+			kept := make([]note, 0, len(skipped))
+			for _, f := range skipped {
+				kept = append(kept, note{f, "locally modified, not overwritten"})
+			}
+
+			printNotes(c, kept...)
 		}
-	}
-
-	valid := e.validateAll(ctx, results)
-
-	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
-		e.logf("warning: %s", w)
 	}
 
 	unitChanged := map[string]bool{}
@@ -235,6 +310,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	github := githubConfigured(results[repos.Server].Tree)
 	anything := false
+	say := func(format string, args ...any) { c.Println(fmt.Sprintf(format, args...)) }
 
 	for _, repo := range repos.Apps {
 		needs := moved[repo] || configChanged[repo] || handEdited[repo] || imageChanged[repo] || unitChanged[repo]
@@ -246,43 +322,45 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 		switch {
 		case buildFailed[repo]:
-			e.logf("%-22s not restarted: image build failed", repo)
-		case !valid[repo]:
-			e.logf("%-22s not restarted: config invalid", repo)
+			say("%-22s not restarted: image build failed", repo)
+		case invalid[repo] != nil:
+			say("%-22s not restarted: config invalid", repo)
 		case repo == repos.Server && !github:
-			e.logf("%-22s not started: github block missing in server.yaml", repo)
+			say("%-22s not started: github block missing in server.yaml", repo)
 		case needsDocker(repo) && !e.Host.Docker:
-			e.logf("%-22s not started: docker not available", repo)
+			say("%-22s not started: docker not available", repo)
 		case hold[repo] != "":
-			e.logf("%-22s not started: %s", repo, hold[repo])
+			say("%-22s not started: %s", repo, hold[repo])
 		case unmanaged:
 			// Nothing to restart, and the old image stays until the user
 			// restarts the process by hand.
 			continue
 		default:
 			if err := e.Services.Restart(ctx, repo); err != nil {
-				e.logf("%-22s restart failed: %v", repo, err)
-				e.printRecentLogs(ctx, repo)
+				say("%-22s restart failed: %v", repo, err)
+				e.printRecentLogs(ctx, c, repo)
 
 				continue
 			}
 
-			e.logf("%-22s restarted", repo)
+			say("%-22s restarted", repo)
 
 			if old := oldTags[repo]; old != "" && imageChanged[repo] {
 				if err := e.Images.RemoveImage(ctx, old); err != nil {
-					e.logf("%-22s could not remove old image %s: %v", repo, old, err)
+					say("%-22s could not remove old image %s: %v", repo, old, err)
 				}
 			}
 		}
 	}
 
 	if anything && unmanaged {
-		e.printStartCommands()
+		for _, line := range e.startCommands() {
+			c.Println(line)
+		}
 	}
 
 	if !anything && len(moved) == 0 {
-		e.logf("up to date")
+		c.Println("up to date")
 	}
 
 	st.Docker = e.Host.Docker
@@ -300,9 +378,42 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	}
 
 	// Repeated last, so the build output above cannot scroll it away.
-	e.printSearchNotice()
+	e.showSearchNotice(c)
 
 	return st.Save(e.L.StateFile())
+}
+
+// note is a warning printed indented under the step line it belongs to.
+type note struct{ name, text string }
+
+func printNotes(c *ui.Console, notes ...note) {
+	for _, n := range notes {
+		c.Println("   " + c.Theme().Caution("● "+n.name) + "  " + n.text)
+	}
+}
+
+// showFailure boxes a failed step's output tail on a live console. Plain
+// output already streamed it above the failed line.
+func showFailure(c *ui.Console, s *ui.Step, title string) {
+	if m := c.Theme().Mode(); m.TTY && !m.Plain {
+		c.Println(c.Theme().FailureBox(title, s.Tail(), c.LogPath()))
+	}
+}
+
+func builtImages(head string, b images.Built) string {
+	var built []string
+
+	for _, v := range images.Variants {
+		if _, ok := b.Variants[v]; ok {
+			built = append(built, v)
+		}
+	}
+
+	if len(built) == 0 {
+		return repos.Short(head)
+	}
+
+	return repos.Short(head) + " + " + strings.Join(built, ", ")
 }
 
 func (e *Engine) loadTrees() Trees {
@@ -435,19 +546,19 @@ func integer(tr configsync.Tree, path string) int64 {
 	}
 }
 
-func (e *Engine) printRecentLogs(ctx context.Context, repo string) {
+func (e *Engine) printRecentLogs(ctx context.Context, c *ui.Console, repo string) {
 	logs, err := e.Services.Logs(ctx, repo, 20)
 	if err != nil || strings.TrimSpace(logs) == "" {
 		return
 	}
 
-	e.logf("%s", logs)
+	c.Println(logs)
 }
 
 // removeReplacedVariants drops the images a rebuild untagged. Variant tags
 // are stable and already point at the new images, so unlike the per-commit
 // default tag there is no restart to wait for.
-func (e *Engine) removeReplacedVariants(ctx context.Context, repo string, old, cur map[string]string) {
+func (e *Engine) removeReplacedVariants(ctx context.Context, c *ui.Console, repo string, old, cur map[string]string) {
 	for _, v := range images.Variants {
 		id := old[v]
 		if id == "" || id == cur[v] {
@@ -455,7 +566,7 @@ func (e *Engine) removeReplacedVariants(ctx context.Context, repo string, old, c
 		}
 
 		if err := e.Images.RemoveImage(ctx, id); err != nil {
-			e.logf("%-22s could not remove old %s variant image %s: %v", repo, v, id, err)
+			printNotes(c, note{repo, fmt.Sprintf("could not remove old %s variant image %s: %v", v, id, err)})
 		}
 	}
 }

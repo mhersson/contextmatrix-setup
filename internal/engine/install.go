@@ -49,13 +49,22 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 	newArchitect := st.Repos[repos.Architect].Commit == ""
 
-	heads, err := e.syncRepos(ctx, repos.Apps)
-	if err != nil {
-		return err
+	heads := map[string]string{}
+
+	// One repo at a time, so each head line follows that repo's git output.
+	for _, name := range repos.Apps {
+		head, err := e.syncRepos(ctx, []string{name}, e.Out)
+		if err != nil {
+			return err
+		}
+
+		heads[name] = head[name]
+		e.logf("%-22s %s", name, repos.Short(head[name]))
 	}
 
 	for _, repo := range repos.Apps {
-		if err := e.buildBinary(ctx, repo); err != nil {
+		say := func(cmd string) { e.logf("%-22s %s", repo, cmd) }
+		if err := e.buildBinary(ctx, repo, e.Out, say); err != nil {
 			return err
 		}
 	}
@@ -124,6 +133,10 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 			return err
 		}
 
+		for _, d := range res.Dropped {
+			e.logf("%-22s %s", filepath.Base(res.Path), droppedText(d))
+		}
+
 		results[repo] = res
 		st.Configs[filepath.Base(res.Path)] = state.ConfigHash{SHA256: res.Hash}
 
@@ -137,7 +150,16 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 	st.WorkflowSkills = state.WorkflowSkills{Commit: heads[repos.Server], Files: files}
 
-	valid := e.validateAll(ctx, results)
+	invalid := e.validateAll(ctx, results)
+	valid := map[string]bool{}
+
+	for _, repo := range repos.Apps {
+		valid[repo] = invalid[repo] == nil
+
+		if err := invalid[repo]; err != nil {
+			e.logf("%-22s invalid: %v", filepath.Base(results[repo].Path), err)
+		}
+	}
 
 	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
 		e.logf("warning: %s", w)
@@ -406,21 +428,16 @@ func samePath(a, b string) (bool, error) {
 	return ra == rb, nil
 }
 
-// validateAll runs each app's own validation and reports failures without
-// touching the file; the user fixes the value and reruns.
-func (e *Engine) validateAll(ctx context.Context, results map[string]configResult) map[string]bool {
-	valid := map[string]bool{}
+// validateAll runs each app's own validation, nil meaning valid. A failure
+// never touches the file; the user fixes the value and reruns.
+func (e *Engine) validateAll(ctx context.Context, results map[string]configResult) map[string]error {
+	errs := map[string]error{}
 
 	for _, repo := range repos.Apps {
-		err := configsync.Validate(ctx, e.R, e.Host.Binary(binaryFor(repo)), results[repo].Path)
-		valid[repo] = err == nil
-
-		if err != nil {
-			e.logf("%-22s invalid: %v", filepath.Base(results[repo].Path), err)
-		}
+		errs[repo] = configsync.Validate(ctx, e.R, e.Host.Binary(binaryFor(repo)), results[repo].Path)
 	}
 
-	return valid
+	return errs
 }
 
 func (e *Engine) installUnits(ctx context.Context, trees Trees) error {
@@ -477,11 +494,19 @@ func (e *Engine) startEligible(ctx context.Context, github bool, valid map[strin
 }
 
 func (e *Engine) printStartCommands() {
-	e.logf("services not installed; start by hand with:")
-	e.logf("  %s -config %s", e.Host.Binary(repos.Server), e.L.ServerConfig())
-	e.logf("  %s serve --config %s", e.Host.Binary(repos.Agent), e.L.AgentConfig())
-	e.logf("  %s serve --config %s", e.Host.Binary(repos.Chat), e.L.ChatConfig())
-	e.logf("  %s serve --config %s", e.Host.Binary(repos.Architect), e.L.ArchitectConfig())
+	for _, line := range e.startCommands() {
+		e.logf("%s", line)
+	}
+}
+
+func (e *Engine) startCommands() []string {
+	return []string{
+		"services not installed; start by hand with:",
+		fmt.Sprintf("  %s -config %s", e.Host.Binary(repos.Server), e.L.ServerConfig()),
+		fmt.Sprintf("  %s serve --config %s", e.Host.Binary(repos.Agent), e.L.AgentConfig()),
+		fmt.Sprintf("  %s serve --config %s", e.Host.Binary(repos.Chat), e.L.ChatConfig()),
+		fmt.Sprintf("  %s serve --config %s", e.Host.Binary(repos.Architect), e.L.ArchitectConfig()),
+	}
 }
 
 // linkWatch follows the server log for the one-time admin link in the

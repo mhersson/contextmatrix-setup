@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -8,12 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
+	"github.com/mhersson/contextmatrix-setup/internal/ui"
 )
 
 func installed(t *testing.T, docker bool) *harness {
@@ -517,4 +520,84 @@ func TestUpdateContinuesWhenChangeListUnavailable(t *testing.T) {
 	assert.Contains(t, h.out.String(), "change list unavailable")
 	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
 	assert.Equal(t, []string{"contextmatrix-agent"}, restarts(h))
+}
+
+// stepLines returns, in order, the plain step lines that start with glyph.
+func stepLines(out, glyph string) []string {
+	var lines []string
+
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, " "+glyph+" ") {
+			lines = append(lines, l)
+		}
+	}
+
+	return lines
+}
+
+func verbs(lines []string) []string {
+	out := make([]string, 0, len(lines))
+
+	for _, l := range lines {
+		if f := strings.Fields(l); len(f) > 1 {
+			out = append(out, f[1])
+		}
+	}
+
+	return out
+}
+
+func TestUpdateStepsInPlainOutput(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	done := stepLines(out, "✓")
+
+	assert.NotContains(t, out, "\x1b")
+	assert.Equal(t, []string{"fetch", "build", "images", "config"}, verbs(done))
+	assert.Empty(t, stepLines(out, "✗"))
+	require.Len(t, done, 4)
+	assert.Contains(t, done[1], "contextmatrix-agent", "only the moved repo is built")
+	assert.Contains(t, done[2], "contextmatrix-agent-worker")
+	assert.Contains(t, done[3], "agent.yaml", "the config step names the file the new image changed")
+}
+
+func TestUpdateBuildFailureShowsStepTail(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.runner.On("make", "install").Return("boom\n", "", 2)
+
+	require.Error(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	failed := stepLines(out, "✗")
+
+	require.Len(t, failed, 1)
+	assert.Equal(t, []string{"build"}, verbs(failed))
+	assert.Contains(t, failed[0], "contextmatrix-agent")
+	assert.GreaterOrEqual(t, strings.Index(out, "boom"), 0)
+	assert.Less(t, strings.Index(out, "boom"), strings.Index(out, failed[0]), "plain output streams the build output before the failed line")
+}
+
+// A live console shows no build output while the step runs, so a failure
+// boxes the tail and names the log.
+func TestUpdateBuildFailureBoxesTheTailInATerminal(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.runner.On("make", "install").Return("boom\n", "", 2)
+
+	var screen, log bytes.Buffer
+
+	c := ui.NewConsole(&screen, ui.NewTheme(ui.Mode{TTY: true, Width: 100}), &log, "/logs/update.log")
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true, UI: c})
+	c.Close()
+
+	require.Error(t, err)
+	assert.Contains(t, ansi.Strip(screen.String()), "/logs/update.log")
+	assert.Contains(t, log.String(), "boom")
+	assert.Empty(t, h.out.String(), "everything goes through the console")
 }
