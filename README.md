@@ -95,8 +95,9 @@ before the architect gets it at its next `update`: built, configured in
 `architect.yaml` and in `server.yaml`'s `backends.architect` (empty values there
 are filled, as is `enabled: false`; other values you set are kept), and started.
 
-The confirmation shows a table per repo (from and to commit, counts, what
-happens), then one row per merged PR from the first-parent history, with its
+The confirmation shows a summary table with one row per repo (from and to
+commit, counts, what happens). Below it, each repo that was already installed
+gets a rule and one row per merged PR from the first-parent history, with its
 type badge and title. Direct commits appear as their own rows. Dependabot PRs
 are dimmed, listed last, and folded into one row when a repo has more than
 three.
@@ -113,9 +114,13 @@ stays down for 15 seconds is reported as not running, with its recent log
 lines. Without service management, nothing is restarted or checked, and the
 start commands are printed.
 
-`update` exits 1 when the result has a problem: an image that did not build, an
-invalid config for a service that needed a restart, a failed restart, or an
-unhealthy service.
+The run ends with a result table, one row per service that needed a restart:
+its result, its health, the commit it now runs and, with Docker, the worker
+image it runs.
+
+`update` exits 1 when a row of the result table has a problem: an image that
+did not build, an invalid config for a service that needed a restart, a failed
+restart, or an unhealthy service.
 
 With `NO_COLOR` set, `TERM=dumb`, or output that is not a terminal (a pipe, a
 log), `update` prints plain text with the same layout, no colours and no escape
