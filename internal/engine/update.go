@@ -605,8 +605,12 @@ func (e *Engine) workerImage(repo, tag string) string {
 type note struct{ name, text string }
 
 func printNotes(c *ui.Console, notes ...note) {
+	t := c.Theme()
+	w := t.Mode().Width - 1
+
 	for _, n := range notes {
-		c.Println("   " + c.Theme().Caution("● "+n.name) + "  " + n.text)
+		line := t.Caution("● "+n.name) + "  " + ui.OneLine(n.text)
+		c.Println("   " + strings.ReplaceAll(ansi.Wrap(line, w-5, ""), "\n", "\n     "))
 	}
 }
 

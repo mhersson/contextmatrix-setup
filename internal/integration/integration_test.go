@@ -108,7 +108,7 @@ func TestInstallUpdateCycle(t *testing.T) {
 	require.ErrorAs(t, err, &exit, out)
 	assert.Equal(t, 1, exit.ExitCode(), "a config that blocks a restart is a problem")
 	assert.NotContains(t, out, "error: update finished", "the final line already reports it")
-	assert.Contains(t, out, "log_level must be")
+	assert.Contains(t, strings.Join(strings.Fields(out), " "), "log_level must be")
 	assert.Contains(t, e.read(".config/contextmatrix/server.yaml"), "log_level: invalid", "value kept, not repaired")
 	assert.NotContains(t, e.stubLog(), "systemctl --user restart contextmatrix\n")
 
