@@ -3,8 +3,8 @@
 package integration
 
 import (
-	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,6 +76,7 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.NotContains(t, log, "make docker-worker-variants contextmatrix-chat")
 	assert.Contains(t, log, "systemctl --user restart contextmatrix-agent")
 	assert.NotContains(t, log, "systemctl --user restart contextmatrix-chat")
+	assert.Contains(t, out, "not checked", "the health budget env turns the probes off")
 	assert.Contains(t, log, "docker rmi contextmatrix-agent-worker:")
 
 	// Manual edit survives; stale key dropped; server restarted. Replace the
@@ -102,9 +103,12 @@ func TestInstallUpdateCycle(t *testing.T) {
 	require.NoError(t, os.Remove(e.log))
 
 	out, err = e.run("update", "--yes")
-	require.NoError(t, err, out)
 
-	assert.Contains(t, out, "log_level must be")
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit, out)
+	assert.Equal(t, 1, exit.ExitCode(), "a config that blocks a restart is a problem")
+	assert.NotContains(t, out, "error: update finished", "the final line already reports it")
+	assert.Contains(t, strings.Join(strings.Fields(out), " "), "log_level must be")
 	assert.Contains(t, e.read(".config/contextmatrix/server.yaml"), "log_level: invalid", "value kept, not repaired")
 	assert.NotContains(t, e.stubLog(), "systemctl --user restart contextmatrix\n")
 
@@ -127,7 +131,7 @@ func TestWorkflowSkillsCopyOnlyWhenChanged(t *testing.T) {
 	out, err = e.run("update", "--yes")
 	require.NoError(t, err, out)
 
-	assert.NotContains(t, out, fmt.Sprintf("%-22s updated", "workflow-skills"))
+	assert.Empty(t, skillsSteps(out), "unchanged skills are not copied")
 
 	e.commit("contextmatrix", "workflow-skills/create-plan.md", "v2\n")
 
@@ -135,6 +139,20 @@ func TestWorkflowSkillsCopyOnlyWhenChanged(t *testing.T) {
 	require.NoError(t, err, out)
 
 	assert.Equal(t, "v2\n", e.read(".contextmatrix/workflow-skills/create-plan.md"))
+	assert.Len(t, skillsSteps(out), 1, "changed skills are copied in one step")
+}
+
+// skillsSteps returns the plain step lines whose verb is skills.
+func skillsSteps(out string) []string {
+	var lines []string
+
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) > 1 && (f[0] == "✓" || f[0] == "✗") && f[1] == "skills" {
+			lines = append(lines, l)
+		}
+	}
+
+	return lines
 }
 
 func TestInstallWithoutDocker(t *testing.T) {
@@ -276,4 +294,22 @@ func TestUpdateAddsTheArchitectToAnOlderInstall(t *testing.T) {
 	st, _, err = state.Load(stateFile)
 	require.NoError(t, err)
 	assert.NotEmpty(t, st.Repos["contextmatrix-architect"].Commit)
+}
+
+func TestUpdatePlainOutputHasNoEscapes(t *testing.T) {
+	e := newEnv(t)
+
+	out, err := e.run("install", "--yes", "--auth-mode", "multi", "--github-mode", "pat", "--github-pat", "tok", "--openrouter-key", "or")
+	require.NoError(t, err, out)
+
+	e.commit("contextmatrix-agent", "x.go", "package x\n")
+
+	out, err = e.runWith([]string{"NO_COLOR=1", "CONTEXTMATRIX_SETUP_REEXEC="}, "update", "--yes", "--no-self-update")
+	require.NoError(t, err, out)
+
+	assert.NotContains(t, out, "\x1b")
+	assert.Contains(t, out, "change x.go", "the changes view lists the new commit")
+	assert.Contains(t, out, "fetch")
+	assert.Contains(t, out, "restart")
+	assert.Equal(t, 1, strings.Count(out, "ContextMatrix setup"), "one header")
 }

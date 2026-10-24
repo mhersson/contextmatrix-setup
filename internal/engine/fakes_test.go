@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/host"
 	"github.com/mhersson/contextmatrix-setup/internal/images"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 	"github.com/mhersson/contextmatrix-setup/internal/services"
 )
@@ -23,7 +25,8 @@ import (
 type fakeGit struct {
 	heads   map[string]string
 	changed map[string]bool // path -> PathChanged answer
-	logs    map[string]string
+	logs    map[string][]repos.Change
+	errs    map[string]error
 }
 
 func (g *fakeGit) Sync(_ context.Context, dir, _ string, _ io.Writer) (string, error) {
@@ -43,7 +46,11 @@ func (g *fakeGit) Head(_ context.Context, dir string) (string, error) {
 	return g.heads[filepath.Base(dir)], nil
 }
 
-func (g *fakeGit) Log(_ context.Context, dir, _, _ string) (string, error) {
+func (g *fakeGit) Changes(_ context.Context, dir, _, _ string) ([]repos.Change, error) {
+	if err := g.errs[filepath.Base(dir)]; err != nil {
+		return nil, err
+	}
+
 	return g.logs[filepath.Base(dir)], nil
 }
 
@@ -55,6 +62,7 @@ type fakeImages struct {
 	built      []string
 	removed    []string
 	fail       bool
+	removeFail bool
 	dockerHost string
 }
 
@@ -84,6 +92,10 @@ func (f *fakeImages) Build(_ context.Context, _, repo, commit string, out io.Wri
 }
 
 func (f *fakeImages) RemoveImage(_ context.Context, ref string) error {
+	if f.removeFail {
+		return errors.New("image is in use")
+	}
+
 	f.removed = append(f.removed, ref)
 
 	return nil
@@ -146,7 +158,8 @@ func newHarness(t *testing.T, docker bool) *harness {
 			"contextmatrix-chat": "ccccccc3333", "contextmatrix-architect": "ddddddd4444",
 		},
 		changed: map[string]bool{},
-		logs:    map[string]string{},
+		logs:    map[string][]repos.Change{},
+		errs:    map[string]error{},
 	}
 	img := &fakeImages{}
 	out := &bytesBuffer{}
@@ -167,6 +180,11 @@ func newHarness(t *testing.T, docker bool) *harness {
 	// The service PATH has rg unless a test says otherwise, which keeps the
 	// search notice out of every other test's output.
 	e.Host.Search = host.SearchTools{RG: "/usr/bin/rg", FD: "/usr/bin/fd"}
+
+	// Every restarted service answers its health check at once unless a
+	// test says otherwise.
+	e.Probe = func(context.Context, string) error { return nil }
+	e.HealthInterval = time.Millisecond
 
 	return &harness{e: e, runner: f, git: git, images: img, out: out, home: home}
 }

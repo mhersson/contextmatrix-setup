@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,38 +18,42 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/services"
 )
 
-func (e *Engine) syncRepos(ctx context.Context, names []string) (map[string]string, error) {
+func (e *Engine) syncRepos(ctx context.Context, names []string, out io.Writer) (map[string]string, error) {
 	heads := map[string]string{}
 
 	for _, name := range names {
-		head, err := e.Git.Sync(ctx, e.L.SrcDir(name), e.repoURL(name), e.Out)
+		head, err := e.Git.Sync(ctx, e.L.SrcDir(name), e.repoURL(name), out)
 		if err != nil {
 			return nil, fmt.Errorf("sync %s: %w", name, err)
 		}
 
 		heads[name] = head
-
-		e.logf("%-22s %s", name, repos.Short(head))
 	}
 
 	return heads, nil
 }
 
-func (e *Engine) buildBinary(ctx context.Context, repo string) error {
+// buildBinary streams the build to out and hands say each command before
+// it runs; say may be nil.
+func (e *Engine) buildBinary(ctx context.Context, repo string, out io.Writer, say func(cmd string)) error {
+	if say == nil {
+		say = func(string) {}
+	}
+
 	// The server bundles a frontend its install target builds, and a fresh
 	// clone has no node_modules, so the dependencies go in first. Only the
 	// server has one; the backends have no frontend target at all.
 	if repo == repos.Server {
-		e.logf("%-22s make install-frontend", repo)
+		say("make install-frontend")
 
-		if err := e.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"install-frontend"}, Dir: e.L.SrcDir(repo)}, e.Out); err != nil {
+		if err := e.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"install-frontend"}, Dir: e.L.SrcDir(repo)}, out); err != nil {
 			return fmt.Errorf("build %s: %w", repo, err)
 		}
 	}
 
-	e.logf("%-22s make install", repo)
+	say("make install")
 
-	if err := e.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"install"}, Dir: e.L.SrcDir(repo)}, e.Out); err != nil {
+	if err := e.R.Stream(ctx, run.Cmd{Name: "make", Args: []string{"install"}, Dir: e.L.SrcDir(repo)}, out); err != nil {
 		return fmt.Errorf("build %s: %w", repo, err)
 	}
 
@@ -121,14 +126,13 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 	}
 
 	// Merge appends in map iteration order, so sort before reporting.
-	report := slices.Clone(dropped)
-	slices.SortFunc(report, func(a, b configsync.Dropped) int { return strings.Compare(a.Path, b.Path) })
-
-	for _, d := range report {
-		e.logf("%-22s dropped %s (was %v): key no longer exists upstream", filepath.Base(path), d.Path, d.Value)
-	}
+	slices.SortFunc(dropped, func(a, b configsync.Dropped) int { return strings.Compare(a.Path, b.Path) })
 
 	return configResult{Path: path, Changed: changed, Hash: configsync.Hash(data), Dropped: dropped, Tree: merged}, nil
+}
+
+func droppedText(d configsync.Dropped) string {
+	return fmt.Sprintf("dropped %s (was %v): key no longer exists upstream", d.Path, d.Value)
 }
 
 func referenceFor(repo string) string {

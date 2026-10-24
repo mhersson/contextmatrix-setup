@@ -1,18 +1,25 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
+	"github.com/mhersson/contextmatrix-setup/internal/services"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
+	"github.com/mhersson/contextmatrix-setup/internal/ui"
 )
 
 func installed(t *testing.T, docker bool) *harness {
@@ -142,7 +149,7 @@ func TestUpdateRecordsUntrackedVariantAtNextBuild(t *testing.T) {
 	assert.Empty(t, h.images.built, "a partial record builds nothing")
 
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
-	h.git.logs["contextmatrix-agent"] = "b999999 fix(agent): something\n"
+	h.git.logs["contextmatrix-agent"] = []repos.Change{{SHA: "b9999999999", Title: "fix(agent): something", Commits: 1}}
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
 
 	st, _, _ = state.Load(h.e.L.StateFile())
@@ -158,7 +165,7 @@ func TestUpdateRecordsUntrackedVariantAtNextBuild(t *testing.T) {
 func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
 	h := installed(t, true)
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
-	h.git.logs["contextmatrix-agent"] = "b999999 fix(agent): something\n"
+	h.git.logs["contextmatrix-agent"] = []repos.Change{{SHA: "b9999999999", Title: "fix(agent): something", Commits: 1}}
 
 	var summary string
 
@@ -170,7 +177,9 @@ func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
 
 	require.NoError(t, h.e.Update(context.Background(), opts))
 
-	assert.Contains(t, summary, "fix(agent): something")
+	assert.Contains(t, summary, "something")
+	assert.Contains(t, summary, "fix")
+	assert.NotContains(t, summary, "\x1b")
 	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
 	assert.Equal(t, []string{"contextmatrix-agent"}, restarts(h))
 	assert.Equal(t, []string{
@@ -220,12 +229,16 @@ func TestUpdateKeepsManualEditsAndDropsStaleKeys(t *testing.T) {
 	assert.Equal(t, []string{"contextmatrix"}, restarts(h), "config changed, server restarted")
 }
 
-func TestUpdateFailedImageBuildSkipsRestart(t *testing.T) {
+func TestUpdateFailedImageBuildIsAProblem(t *testing.T) {
 	h := installed(t, true)
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
 	h.images.fail = true
 
-	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 1, pe.N)
 
 	assert.Empty(t, restarts(h))
 	assert.Contains(t, h.out.String(), "image build failed")
@@ -502,4 +515,350 @@ func TestUpdateIgnoresThePortOfAnInstalledArchitect(t *testing.T) {
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
 
 	assert.Equal(t, []string{repos.Architect}, restarts(h), "a running architect holds its own port")
+}
+
+func TestUpdateContinuesWhenChangeListUnavailable(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.git.errs["contextmatrix-agent"] = errors.New("git log: bad object")
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Contains(t, h.out.String(), "change list unavailable")
+	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
+	assert.Equal(t, []string{"contextmatrix-agent"}, restarts(h))
+}
+
+// stepLines returns, in order, the plain step lines that start with glyph.
+func stepLines(out, glyph string) []string {
+	var lines []string
+
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, " "+glyph+" ") {
+			lines = append(lines, l)
+		}
+	}
+
+	return lines
+}
+
+func verbs(lines []string) []string {
+	out := make([]string, 0, len(lines))
+
+	for _, l := range lines {
+		if f := strings.Fields(l); len(f) > 1 {
+			out = append(out, f[1])
+		}
+	}
+
+	return out
+}
+
+func TestUpdateStepsInPlainOutput(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	done := stepLines(out, "✓")
+
+	assert.NotContains(t, out, "\x1b")
+	assert.Equal(t, []string{"fetch", "build", "images", "config", "restart", "update"}, verbs(done), "the steps, then the final line")
+	assert.Empty(t, stepLines(out, "✗"))
+	require.Len(t, done, 6)
+	assert.Contains(t, done[1], "contextmatrix-agent", "only the moved repo is built")
+	assert.Contains(t, done[2], "contextmatrix-agent-worker")
+	assert.Contains(t, done[3], "agent.yaml", "the config step names the file the new image changed")
+	assert.Contains(t, done[4], "contextmatrix-agent", "only the moved service restarts")
+	assert.Contains(t, done[4], "healthy")
+}
+
+func TestUpdateBuildFailureShowsStepTail(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.runner.On("make", "install").Return("boom\n", "", 2)
+
+	require.Error(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	failed := stepLines(out, "✗")
+
+	require.Len(t, failed, 1)
+	assert.Equal(t, []string{"build"}, verbs(failed))
+	assert.Contains(t, failed[0], "contextmatrix-agent")
+	assert.GreaterOrEqual(t, strings.Index(out, "boom"), 0)
+	assert.Less(t, strings.Index(out, "boom"), strings.Index(out, failed[0]), "plain output streams the build output before the failed line")
+}
+
+// A live console shows no build output while the step runs, so a failure
+// boxes the tail and names the log.
+func TestUpdateBuildFailureBoxesTheTailInATerminal(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.runner.On("make", "install").Return("boom\n", "", 2)
+
+	var screen, log bytes.Buffer
+
+	c := ui.NewConsole(&screen, ui.NewTheme(ui.Mode{TTY: true, Width: 100}), &log, "/logs/update.log")
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true, UI: c})
+	c.Close()
+
+	require.Error(t, err)
+	assert.Contains(t, ansi.Strip(screen.String()), "/logs/update.log")
+	assert.Contains(t, log.String(), "boom")
+	assert.Empty(t, h.out.String(), "everything goes through the console")
+}
+
+func TestUpdateUnhealthyServiceReturnsProblems(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.Probe = refused
+	h.e.HealthBudget = 10 * time.Millisecond
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 1, pe.N)
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "connection refused")
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, "b9999999999", st.Repos["contextmatrix-agent"].Commit, "the new binary is installed whatever its health")
+}
+
+func TestUpdateHealthyRunSucceeds(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	row := resultRow(t, h.out.String(), repos.Agent)
+	assert.Contains(t, row, "restarted")
+	assert.Contains(t, row, "healthy")
+	assert.Contains(t, row, "b999999", "the service now runs the new commit")
+	assert.Contains(t, row, "agent-worker:b999999", "and the new worker image")
+}
+
+func TestUpdateFailedRestartShowsTheOldWorkerImage(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.runner.On("systemctl", "--user", "restart", repos.Agent).Return("", "unit failed", 1)
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+
+	row := resultRow(t, h.out.String(), repos.Agent)
+	assert.Contains(t, row, "restart failed")
+	assert.Contains(t, row, "agent-worker:bbbbbbb", "the image built but the service never restarted onto it")
+	assert.NotContains(t, row, "b999999")
+	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
+}
+
+// A service that is down after its restart is reported at once, with the
+// lines it logged, instead of waiting out the budget.
+func TestUpdateStoppedServiceShowsItsLogs(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.Services = inactive{h.e.Services}
+	h.e.Probe = refused
+	h.e.NotRunningGrace = time.Millisecond
+	h.runner.On("journalctl", "--user", "-u", repos.Agent).Return("panic: bad config\n", "", 0)
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "not running")
+
+	out := h.out.String()
+	assert.Greater(t, strings.Index(out, "panic: bad config"), strings.Index(out, "Result"), "the log lines follow the table")
+}
+
+func TestUpdateUnmanagedDoesNotProbe(t *testing.T) {
+	h := declined(t)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.Probe = func(context.Context, string) error {
+		t.Error("an unmanaged service was probed")
+
+		return nil
+	}
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	assert.Contains(t, resultRow(t, out, repos.Agent), "start by hand")
+	assert.Contains(t, out, h.e.L.AgentConfig(), "the start commands still print")
+}
+
+func TestUpdateSkipHealthShowsNotChecked(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.SkipHealth = true
+
+	var calls atomic.Int32
+
+	h.e.Probe = func(context.Context, string) error {
+		calls.Add(1)
+
+		return nil
+	}
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Zero(t, calls.Load())
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "not checked")
+}
+
+// A docker that appears with a broken build leaves no image recorded; the
+// next update builds it although no repo moved.
+func TestUpdateRetriesAFailedImageBuildAfterDockerAppeared(t *testing.T) {
+	h := installed(t, false)
+	h.e.Host.Docker = true
+	h.images.fail = true
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 2, pe.N, "agent and chat")
+	assert.NotContains(t, restarts(h), repos.Agent)
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "not started")
+	assert.NotContains(t, h.out.String(), "keeps running", "a backend that never ran without docker keeps nothing")
+
+	h.images.fail = false
+	h.out.b = nil
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{"contextmatrix-agent-worker:bbbbbbb", "contextmatrix-chat-worker:ccccccc"}, h.images.built)
+	assert.Contains(t, restarts(h), repos.Agent)
+	assert.Contains(t, restarts(h), repos.Chat)
+}
+
+// clock is a console clock that only a test moves.
+type clock struct{ ns atomic.Int64 }
+
+func (c *clock) now() time.Time { return time.Unix(0, c.ns.Load()) }
+
+// slowRestart takes five seconds of the console clock to restart a service.
+type slowRestart struct {
+	services.Manager
+
+	clock *clock
+}
+
+func (m slowRestart) Restart(ctx context.Context, name string) error {
+	m.clock.ns.Add(int64(5 * time.Second))
+
+	return m.Manager.Restart(ctx, name)
+}
+
+func TestUpdateRestartStepCoversTheRestart(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+
+	clk := &clock{}
+	h.e.Services = slowRestart{Manager: h.e.Services, clock: clk}
+
+	var screen bytes.Buffer
+
+	c := ui.NewConsole(&screen, ui.NewTheme(ui.Mode{Plain: true, Width: 100}), nil, "")
+	c.Now = clk.now
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true, UI: c}))
+	c.Close()
+
+	var restart []string
+
+	for _, l := range stepLines(screen.String(), "✓") {
+		if f := strings.Fields(l); f[1] == "restart" {
+			restart = append(restart, l)
+		}
+	}
+
+	require.Len(t, restart, 1)
+	assert.True(t, strings.HasSuffix(restart[0], "5.0s"), "the step was running while the service restarted: %q", restart[0])
+}
+
+func TestUpdateRemovalNoteFollowsTheRestartSteps(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.images.removeFail = true
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	restart := stepLines(out, "✓")
+	note := strings.Index(out, "could not remove old image contextmatrix-agent-worker:bbbbbbb")
+
+	require.NotEmpty(t, restart)
+	require.GreaterOrEqual(t, note, 0)
+	assert.Greater(t, note, strings.Index(out, " restart  "+repos.Agent), "the note comes after the restart step it belongs to")
+}
+
+// slowAgentRestart takes longer than the health budget to restart the agent
+// and records when that restart returned.
+type slowAgentRestart struct {
+	services.Manager
+
+	delay    time.Duration
+	returned atomic.Int64
+}
+
+func (m *slowAgentRestart) Restart(ctx context.Context, name string) error {
+	if name == repos.Agent {
+		time.Sleep(m.delay)
+		defer m.returned.Store(time.Now().UnixNano())
+	}
+
+	return m.Manager.Restart(ctx, name)
+}
+
+// The budget starts once the last restart has returned, so a service that
+// is slow to restart is still probed, and the set ends a budget later.
+func TestUpdateHealthBudgetStartsAfterTheLastRestart(t *testing.T) {
+	const budget = 200 * time.Millisecond
+
+	h := installed(t, true)
+	h.git.heads["contextmatrix"] = "a9999999999"
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.HealthBudget = budget
+
+	m := &slowAgentRestart{Manager: h.e.Services, delay: 300 * time.Millisecond}
+	h.e.Services = m
+
+	var agentCalls, agentAfterRestart atomic.Int32
+
+	h.e.Probe = func(_ context.Context, url string) error {
+		if !strings.Contains(url, ":19092/") {
+			return errors.New("connection refused")
+		}
+
+		if r := m.returned.Load(); r != 0 && time.Now().UnixNano() >= r {
+			agentAfterRestart.Add(1)
+		}
+
+		if agentCalls.Add(1) <= 2 {
+			return errors.New("connection refused")
+		}
+
+		return nil
+	}
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+	sinceLast := time.Since(time.Unix(0, m.returned.Load()))
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 1, pe.N, "only the server, whose probe never passes")
+	assert.Positive(t, agentAfterRestart.Load(), "the agent is probed after its slow restart")
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "healthy")
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Server+" "), "connection refused")
+	assert.GreaterOrEqual(t, sinceLast, budget, "the server kept trying for a whole budget after the last restart")
+	assert.Less(t, sinceLast, budget+time.Second, "and not much longer")
 }

@@ -1,6 +1,9 @@
 package engine
 
-import "github.com/mhersson/contextmatrix-setup/internal/host"
+import (
+	"github.com/mhersson/contextmatrix-setup/internal/host"
+	"github.com/mhersson/contextmatrix-setup/internal/ui"
+)
 
 // searchNotice is the warning block for a host whose service PATH lacks rg:
 // the architect's grep tool fails in every code stage until rg is there.
@@ -41,5 +44,11 @@ func rgInstallHint(goos string) string {
 func (e *Engine) printSearchNotice() {
 	for _, line := range searchNotice(e.Host) {
 		e.logf("%s", line)
+	}
+}
+
+func (e *Engine) showSearchNotice(c *ui.Console) {
+	for _, line := range searchNotice(e.Host) {
+		c.Println(c.Theme().Caution(line))
 	}
 }

@@ -17,7 +17,7 @@ import (
 type Git interface {
 	Sync(ctx context.Context, dir, url string, out io.Writer) (string, error)
 	Head(ctx context.Context, dir string) (string, error)
-	Log(ctx context.Context, dir, from, to string) (string, error)
+	Changes(ctx context.Context, dir, from, to string) ([]repos.Change, error)
 	PathChanged(ctx context.Context, dir, from, to, path string) (bool, error)
 }
 
@@ -41,6 +41,19 @@ type Engine struct {
 	RepoURL  func(name string) string
 	// PortFree reports whether a port can be bound; nil uses host.PortFree.
 	PortFree func(port int) bool
+	// Probe checks one health URL; nil uses httpProbe.
+	Probe func(ctx context.Context, url string) error
+	// HealthBudget bounds the health wait for all restarted services
+	// together, counted from the return of the last restart (zero means
+	// 60s); HealthInterval spaces one service's probes (zero means 1s).
+	// SkipHealth restarts without probing.
+	HealthBudget   time.Duration
+	HealthInterval time.Duration
+	SkipHealth     bool
+	// NotRunningGrace is how long a service must stay stopped before the
+	// health wait gives up on it; zero means 15s, which outlasts the
+	// units' 10s restart delay.
+	NotRunningGrace time.Duration
 }
 
 func (e *Engine) now() time.Time {

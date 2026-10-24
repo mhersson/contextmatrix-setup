@@ -69,3 +69,9 @@ func TestRuntimeDirsAndTilde(t *testing.T) {
 	assert.Equal(t, "/opt/x", Tilde(l, "/opt/x"))
 	assert.Equal(t, filepath.Join("/home/u", "Library", "Logs", "contextmatrix"), l.MacLogsDir())
 }
+
+func TestLayoutLogsDir(t *testing.T) {
+	assert.Equal(t, "/home/u/.cache/contextmatrix-setup/logs", New("/home/u", env(nil)).LogsDir())
+	assert.Equal(t, "/cache/contextmatrix-setup/logs",
+		New("/home/u", env(map[string]string{"XDG_CACHE_HOME": "/cache"})).LogsDir())
+}
