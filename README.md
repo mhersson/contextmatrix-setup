@@ -102,6 +102,8 @@ type badge and title. Direct commits appear as their own rows. Dependabot PRs
 are dimmed, listed last, and folded into one row when a repo has more than
 three.
 
+![The changes view before update asks to go ahead](assets/update-changes.png)
+
 Progress is one line per step. In a terminal, the output of git, make and
 docker goes to a run log, `~/.cache/contextmatrix-setup/logs/update-<timestamp>.log`
 (under `$XDG_CACHE_HOME` when set), and the newest 10 logs are kept. When a step
@@ -113,6 +115,8 @@ config. It waits up to 60 seconds after the last restart. A service whose unit
 stays down for 15 seconds is reported as not running, with its recent log
 lines. Without service management, nothing is restarted or checked, and the
 start commands are printed.
+
+![A successful update run: steps and the result table](assets/update-run.png)
 
 The run ends with a result table, one row per service that needed a restart:
 its result, its health, the commit it now runs and, with Docker, the worker
