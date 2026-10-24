@@ -95,6 +95,32 @@ before the architect gets it at its next `update`: built, configured in
 `architect.yaml` and in `server.yaml`'s `backends.architect` (empty values there
 are filled, as is `enabled: false`; other values you set are kept), and started.
 
+The confirmation shows a table per repo (from and to commit, counts, what
+happens), then one row per merged PR from the first-parent history, with its
+type badge and title. Direct commits appear as their own rows. Dependabot PRs
+are dimmed, listed last, and folded into one row when a repo has more than
+three.
+
+Progress is one line per step. In a terminal, the output of git, make and
+docker goes to a run log, `~/.cache/contextmatrix-setup/logs/update-<timestamp>.log`
+(under `$XDG_CACHE_HOME` when set), and the newest 10 logs are kept. When a step
+fails, its last 40 lines are shown with the log path.
+
+After restarting, `update` checks each restarted service: `/healthz` on the
+server and `/health` on the agent, chat and architect, on the port in its
+config. It waits up to 60 seconds after the last restart. A service whose unit
+stays down for 15 seconds is reported as not running, with its recent log
+lines. Without service management, nothing is restarted or checked, and the
+start commands are printed.
+
+`update` exits 1 when the result has a problem: an image that did not build, an
+invalid config for a service that needed a restart, a failed restart, or an
+unhealthy service.
+
+With `NO_COLOR` set, `TERM=dumb`, or output that is not a terminal (a pipe, a
+log), `update` prints plain text with the same layout, no colours and no escape
+codes. Subprocess output streams inline and no run log is written.
+
 ## Other commands
 
 | Command     | Effect                                                                                  |
@@ -121,6 +147,7 @@ upstream are never touched.
 | State, boards, skills, logs | `~/.contextmatrix/`                                                     |
 | Installer record            | `~/.contextmatrix/setup/state.yaml`                                     |
 | Source cache                | `~/.cache/contextmatrix-setup/src/`                                     |
+| Update run logs             | `~/.cache/contextmatrix-setup/logs/`                                    |
 | Binaries                    | `$GOBIN` or `$(go env GOPATH)/bin`                                      |
 | Units                       | `~/.config/systemd/user/` or `~/Library/LaunchAgents/`                  |
 | Service logs                | `journalctl --user -u contextmatrix` or `~/Library/Logs/contextmatrix/` |
