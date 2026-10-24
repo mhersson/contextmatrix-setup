@@ -178,19 +178,19 @@ type flapping struct {
 func (m *flapping) Active(context.Context, string) (bool, error) {
 	d := time.Since(m.start)
 
-	return (d >= 70*time.Millisecond && d < 100*time.Millisecond) || d >= 170*time.Millisecond, nil
+	return (d >= 350*time.Millisecond && d < 500*time.Millisecond) || d >= 850*time.Millisecond, nil
 }
 
 func TestHealthGraceRestartsWhenTheServiceComesBack(t *testing.T) {
 	e := newHarness(t, true).e
 	e.Services = &flapping{Manager: e.Services, start: time.Now()}
-	e.NotRunningGrace = 100 * time.Millisecond
-	e.HealthInterval = 2 * time.Millisecond
+	e.NotRunningGrace = 500 * time.Millisecond
+	e.HealthInterval = 10 * time.Millisecond
 	e.HealthBudget = 10 * time.Second
 
 	start := time.Now()
 	e.Probe = func(context.Context, string) error {
-		if time.Since(start) < 180*time.Millisecond {
+		if time.Since(start) < 900*time.Millisecond {
 			return errors.New("connection refused")
 		}
 
