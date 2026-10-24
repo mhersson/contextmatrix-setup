@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -504,4 +505,16 @@ func TestUpdateIgnoresThePortOfAnInstalledArchitect(t *testing.T) {
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
 
 	assert.Equal(t, []string{repos.Architect}, restarts(h), "a running architect holds its own port")
+}
+
+func TestUpdateContinuesWhenChangeListUnavailable(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.git.errs["contextmatrix-agent"] = errors.New("git log: bad object")
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Contains(t, h.out.String(), "change list unavailable")
+	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
+	assert.Equal(t, []string{"contextmatrix-agent"}, restarts(h))
 }

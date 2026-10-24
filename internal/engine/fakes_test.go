@@ -25,6 +25,7 @@ type fakeGit struct {
 	heads   map[string]string
 	changed map[string]bool // path -> PathChanged answer
 	logs    map[string][]repos.Change
+	errs    map[string]error
 }
 
 func (g *fakeGit) Sync(_ context.Context, dir, _ string, _ io.Writer) (string, error) {
@@ -45,6 +46,10 @@ func (g *fakeGit) Head(_ context.Context, dir string) (string, error) {
 }
 
 func (g *fakeGit) Changes(_ context.Context, dir, _, _ string) ([]repos.Change, error) {
+	if err := g.errs[filepath.Base(dir)]; err != nil {
+		return nil, err
+	}
+
 	return g.logs[filepath.Base(dir)], nil
 }
 
@@ -148,6 +153,7 @@ func newHarness(t *testing.T, docker bool) *harness {
 		},
 		changed: map[string]bool{},
 		logs:    map[string][]repos.Change{},
+		errs:    map[string]error{},
 	}
 	img := &fakeImages{}
 	out := &bytesBuffer{}

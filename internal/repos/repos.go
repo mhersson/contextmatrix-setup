@@ -109,7 +109,10 @@ func ParseFirstParent(raw string) []Change {
 
 		if m := mergePR.FindStringSubmatch(subject); m != nil && len(parents) == 2 {
 			c.PR, _ = strconv.Atoi(m[1])
-			c.Title = firstLine(body)
+			if t := firstLine(body); t != "" {
+				c.Title = t
+			}
+
 			c.Dependabot = strings.Contains(m[2], "dependabot/")
 		} else if m := squashPR.FindStringSubmatch(subject); m != nil {
 			c.PR, _ = strconv.Atoi(m[2])
@@ -159,8 +162,9 @@ func (g Git) Changes(ctx context.Context, dir, from, to string) ([]Change, error
 			return nil, err
 		}
 
+		// The count is display-only: a failed rev-list keeps Commits at 1.
 		if cnt.ExitCode != 0 {
-			return nil, fmt.Errorf("git rev-list in %s: %s", dir, strings.TrimSpace(cnt.Stderr))
+			continue
 		}
 
 		if n, err := strconv.Atoi(strings.TrimSpace(cnt.Stdout)); err == nil && n > 0 {

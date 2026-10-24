@@ -140,10 +140,12 @@ func TestParseFirstParent(t *testing.T) {
 	raw := rec("a1", "p1 p2", "alice", "Merge pull request #52 from o/docs/x", "\ndocs(design): name it\n") +
 		rec("b2", "q1 q2", "bob", "Merge pull request #9 from o/dependabot/go_modules/x", "\nbuild(deps): bump x\n") +
 		rec("c3", "r1", "dependabot[bot]", "fix(web): y (#17)", "") +
-		rec("d4", "s1", "carol", "chore: z", "")
+		rec("d4", "s1", "carol", "chore: z", "") +
+		rec("e5", "t1 t2", "dan", "Merge pull request #3 from o/feat/y", "")
 
 	got := ParseFirstParent(raw)
-	require.Len(t, got, 4)
+	require.Len(t, got, 5)
+	assert.Equal(t, "Merge pull request #3 from o/feat/y", got[4].Title)
 	assert.Equal(t, Change{SHA: "a1", Parents: []string{"p1", "p2"}, PR: 52, Title: "docs(design): name it", Commits: 1}, got[0])
 	assert.Equal(t, 9, got[1].PR)
 	assert.True(t, got[1].Dependabot)
@@ -188,4 +190,15 @@ func TestChangesFailsOnUnreachableRange(t *testing.T) {
 
 	_, err := Git{R: f}.Changes(context.Background(), "/d", "a", "b")
 	assert.ErrorContains(t, err, "bad revision")
+}
+
+func TestChangesKeepsListWhenCountFails(t *testing.T) {
+	f := run.NewFake()
+	f.On("git", "log").Return("m1\x1fp1 p2\x1fal\x1fMerge pull request #5 from o/feat/x\x1f\nfeat: x\n\x1e\n", "", 0)
+	f.On("git", "rev-list").Return("", "bad object", 128)
+
+	got, err := Git{R: f}.Changes(context.Background(), "/d", "a", "b")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, 1, got[0].Commits)
 }

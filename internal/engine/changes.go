@@ -63,7 +63,7 @@ func renderChanges(t *ui.Theme, list []repoChanges) string {
 		b.WriteString("\n " + boxed.Rule(rc.Repo, repos.Short(rc.From)+" → "+repos.Short(rc.To)) + "\n")
 
 		if rc.Err != nil {
-			b.WriteString(ui.Fit("   "+t.Dim("change list unavailable: "+rc.Err.Error()), t.Mode().Width-1) + "\n")
+			b.WriteString(ui.Fit("   "+t.Dim("change list unavailable: "+strings.Join(strings.Fields(rc.Err.Error()), " ")), t.Mode().Width-1) + "\n")
 
 			continue
 		}
@@ -96,7 +96,7 @@ func changeCounts(t *ui.Theme, rc repoChanges) string {
 
 	for _, c := range rc.Changes {
 		switch {
-		case c.PR > 0 && c.Dependabot:
+		case c.Dependabot:
 			deps++
 		case c.PR > 0:
 			prs++
