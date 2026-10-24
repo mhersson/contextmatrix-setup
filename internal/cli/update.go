@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
@@ -37,11 +38,16 @@ func newUpdateCmd() *cobra.Command {
 			}
 
 			mode := ui.Mode{Plain: true, Width: 100}
+			out := e.Out
+
 			if cmd.OutOrStdout() == io.Writer(os.Stdout) {
 				mode = ui.Detect(os.Stdout, os.Getenv)
+				if !mode.Plain {
+					out = styledOut(os.Stdout, os.Environ())
+				}
 			}
 
-			c, closeConsole, err := newUpdateConsole(e.Out, mode, e.L, os.Getenv, time.Now())
+			c, closeConsole, err := newUpdateConsole(out, mode, e.L, os.Getenv, time.Now())
 			if err != nil {
 				return err
 			}
@@ -73,6 +79,17 @@ func newUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noSelf, "no-self-update", false, "skip rebuilding contextmatrix-setup itself")
 
 	return cmd
+}
+
+// styledOut downsamples the 24-bit colour lipgloss renders to the
+// terminal's profile. The writer rewrites only SGR, so cursor moves and
+// links pass, except under NoTTY (TERM unset), which strips them as well.
+func styledOut(stdout io.Writer, environ []string) io.Writer {
+	if w := colorprofile.NewWriter(stdout, environ); w.Profile > colorprofile.NoTTY {
+		return w
+	}
+
+	return stdout
 }
 
 // healthFromEnv applies the test-only CONTEXTMATRIX_SETUP_HEALTH_BUDGET, a Go
@@ -158,8 +175,13 @@ func updateConfirm(c *ui.Console, in io.Reader) func(string) bool {
 		c.Prompt(" " + c.Theme().Accent("?") + " Apply these updates? [Y/n] ")
 
 		line, err := r.ReadString('\n')
-		if err != nil && line == "" {
-			return true
+		if err != nil {
+			// No Enter was echoed, so the prompt row is still open.
+			c.Println("")
+
+			if line == "" {
+				return true
+			}
 		}
 
 		switch strings.ToLower(strings.TrimSpace(line)) {

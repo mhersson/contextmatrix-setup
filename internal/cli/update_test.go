@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,4 +158,35 @@ func TestUpdateConfirmParsesAnswer(t *testing.T) {
 		assert.Equal(t, want, updateConfirm(c, strings.NewReader(in))("s"), "input %q", in)
 		assert.NotEmpty(t, out.String(), "a prompt is written before the answer is read")
 	}
+}
+
+// Without an Enter the terminal echoed no line break, so the prompt row is
+// still open until the console ends it.
+func TestUpdateConfirmEndsThePromptLineWithoutEnter(t *testing.T) {
+	for in, breaks := range map[string]int{"": 1, "n": 1, "y\n": 0} {
+		var out bytes.Buffer
+
+		c := ui.NewConsole(&out, ui.NewTheme(ui.Mode{Plain: true}), nil, "")
+		updateConfirm(c, strings.NewReader(in))("s")
+
+		s := out.String()
+		assert.Equal(t, breaks, strings.Count(s, "\n"), "input %q: %q", in, s)
+		assert.Equal(t, breaks == 1, strings.HasSuffix(s, "\n"), "input %q: %q", in, s)
+	}
+}
+
+func TestStyledOutDownsamplesOnlyColour(t *testing.T) {
+	colour := ui.NewTheme(ui.Mode{TTY: true, Width: 100}).Accent("x")
+	require.Contains(t, colour, "38;2;", "lipgloss renders 24-bit colour")
+
+	const kept = "\r\x1b[1A\x1b[2K\x1b]8;;https://example.com\x07x\x1b]8;;\x07"
+
+	var b bytes.Buffer
+
+	_, err := io.WriteString(styledOut(&b, []string{"TTY_FORCE=1", "TERM=vt100"}), colour+kept)
+	require.NoError(t, err)
+	assert.NotContains(t, b.String(), "38;2;", "a 16-colour terminal gets 16 colours")
+	assert.Contains(t, b.String(), "x\x1b[m"+kept, "cursor moves and links pass through")
+
+	assert.Same(t, io.Writer(&b), styledOut(&b, []string{"TTY_FORCE=1"}), "a profile that would strip cursor moves is not used")
 }
