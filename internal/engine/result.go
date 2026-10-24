@@ -2,7 +2,6 @@ package engine
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -44,15 +43,10 @@ func renderResult(t *ui.Theme, rows []serviceResult, docker bool) string {
 		cells = append(cells, row)
 	}
 
-	// One column less for the indent.
-	m := t.Mode()
-	m.Width--
-	table := ui.NewTheme(m).Table(headers, cells)
-
 	var b strings.Builder
 
 	b.WriteString("\n " + t.Bold("Result") + "\n")
-	b.WriteString(" " + strings.ReplaceAll(table, "\n", "\n "))
+	b.WriteString(ui.Indent(t.Inset().Table(headers, cells)))
 
 	for _, r := range rows {
 		if n := noteLines(t, r); n != "" {
@@ -81,9 +75,9 @@ func healthCell(t *ui.Theme, h healthResult) string {
 	case h.OK:
 		return t.Good("✓ healthy")
 	case h.Checked:
-		return t.Bad("✗ " + flat(h.Reason))
+		return t.Bad("✗ " + ui.OneLine(h.Reason))
 	case h.Reason != "":
-		return t.Dim(flat(h.Reason))
+		return t.Dim(ui.OneLine(h.Reason))
 	default:
 		return t.Dim("–")
 	}
@@ -106,7 +100,7 @@ func noteLines(t *ui.Theme, r serviceResult) string {
 	var lines []string
 
 	for _, l := range strings.Split(r.Note, "\n") {
-		if l = flat(l); l != "" {
+		if l = ui.OneLine(l); l != "" {
 			lines = append(lines, l)
 		}
 	}
@@ -129,12 +123,4 @@ func noteLines(t *ui.Theme, r serviceResult) string {
 	}
 
 	return out
-}
-
-// flat strips escapes and folds whitespace and control characters, which a
-// journal line or an error may carry, so widths are measured right.
-func flat(s string) string {
-	return strings.Join(strings.FieldsFunc(ansi.Strip(s), func(r rune) bool {
-		return unicode.IsSpace(r) || unicode.IsControl(r)
-	}), " ")
 }

@@ -49,11 +49,9 @@ func renderChanges(t *ui.Theme, list []repoChanges) string {
 	}
 
 	// Table and rule fill their theme's width, and both are indented one cell.
-	m := t.Mode()
-	m.Width--
-	boxed := ui.NewTheme(m)
+	boxed := t.Inset()
 
-	b.WriteString(indent(boxed.Table([]string{"REPO", "FROM → TO", "CHANGES", "WHAT HAPPENS"}, rows), " ") + "\n")
+	b.WriteString(ui.Indent(boxed.Table([]string{"REPO", "FROM → TO", "CHANGES", "WHAT HAPPENS"}, rows)) + "\n")
 
 	for _, rc := range list {
 		if rc.From == "" {
@@ -225,13 +223,4 @@ func changeRow(t *ui.Theme, web string, c repos.Change) string {
 	room := t.Mode().Width - 1 - lipgloss.Width(lead) - lipgloss.Width(extra)
 
 	return lead + ui.Fit(summary, room) + extra
-}
-
-func indent(s, pad string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = pad + l
-	}
-
-	return strings.Join(lines, "\n")
 }

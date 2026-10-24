@@ -52,7 +52,7 @@ func (t *Theme) spinner(frame int) string {
 
 func (t *Theme) stepRow(glyph string, state StepState, verb, target, detail string, elapsed time.Duration) string {
 	w := t.mode.Width - 1
-	verb, target, detail = Fit(oneLine(verb), verbWidth-1), Fit(oneLine(target), targetWidth-1), oneLine(detail)
+	verb, target, detail = Fit(OneLine(verb), verbWidth-1), Fit(OneLine(target), targetWidth-1), OneLine(detail)
 
 	if detail != "" {
 		switch state {
@@ -81,9 +81,10 @@ func (t *Theme) stepRow(glyph string, state StepState, verb, target, detail stri
 	return Fit(line, w)
 }
 
-// oneLine strips escapes and folds each run of whitespace or control
-// characters to one space, so a multi-line error stays on its row.
-func oneLine(s string) string {
+// OneLine strips escapes and folds each run of whitespace or control
+// characters to one space, so a multi-line error or log line stays on its
+// row and measures right.
+func OneLine(s string) string {
 	return strings.Join(strings.FieldsFunc(ansi.Strip(s), func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsControl(r)
 	}), " ")
@@ -114,7 +115,7 @@ func (t *Theme) FailureBox(title string, tail []string, logPath string) string {
 		}
 	}
 
-	head := " " + t.Bad("✗ "+oneLine(title))
+	head := " " + t.Bad("✗ "+OneLine(title))
 	if len(rows) > 0 {
 		head += "  " + t.Dim(fmt.Sprintf("last %d lines", len(rows)))
 	}
@@ -141,5 +142,5 @@ func (t *Theme) FailureBox(title string, tail []string, logPath string) string {
 		Width(boxWidth).
 		Render(body)
 
-	return head + "\n " + strings.ReplaceAll(box, "\n", "\n ")
+	return head + "\n" + Indent(box)
 }

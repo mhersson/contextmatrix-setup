@@ -71,6 +71,20 @@ func (t *Theme) Rule(label, detail string) string {
 	return t.Dim("── ") + body + " " + t.Dim(strings.Repeat("─", fill))
 }
 
+// Inset is the theme for content indented one cell: one column narrower,
+// so the content still ends within Width-1.
+func (t *Theme) Inset() *Theme {
+	m := t.mode
+	m.Width--
+
+	return NewTheme(m)
+}
+
+// Indent shifts every line of s right by the one cell Inset leaves.
+func Indent(s string) string {
+	return " " + strings.ReplaceAll(s, "\n", "\n ")
+}
+
 // Fit truncates a styled string to w cells.
 func Fit(s string, w int) string {
 	if w <= 0 {
