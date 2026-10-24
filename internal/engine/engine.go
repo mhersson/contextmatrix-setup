@@ -49,6 +49,10 @@ type Engine struct {
 	HealthBudget   time.Duration
 	HealthInterval time.Duration
 	SkipHealth     bool
+	// NotRunningGrace is how long a service must stay stopped before the
+	// health wait gives up on it; zero means 15s, which outlasts the
+	// units' 10s restart delay.
+	NotRunningGrace time.Duration
 }
 
 func (e *Engine) now() time.Time {

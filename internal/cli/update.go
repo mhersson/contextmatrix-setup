@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -23,6 +25,10 @@ func newUpdateCmd() *cobra.Command {
 
 			e, err := newEngine(ctx, cmd.OutOrStdout())
 			if err != nil {
+				return err
+			}
+
+			if err := healthFromEnv(e, os.Getenv); err != nil {
 				return err
 			}
 
@@ -50,4 +56,26 @@ func newUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noSelf, "no-self-update", false, "skip rebuilding contextmatrix-setup itself")
 
 	return cmd
+}
+
+// healthFromEnv applies the test-only CONTEXTMATRIX_SETUP_HEALTH_BUDGET, a Go
+// duration: 0 skips the health check, a positive value bounds it.
+func healthFromEnv(e *engine.Engine, getenv func(string) string) error {
+	v := getenv("CONTEXTMATRIX_SETUP_HEALTH_BUDGET")
+	if v == "" {
+		return nil
+	}
+
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return fmt.Errorf("CONTEXTMATRIX_SETUP_HEALTH_BUDGET=%q: want a duration such as 30s, or 0", v)
+	}
+
+	if d == 0 {
+		e.SkipHealth = true
+	} else {
+		e.HealthBudget = d
+	}
+
+	return nil
 }

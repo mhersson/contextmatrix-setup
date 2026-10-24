@@ -88,6 +88,7 @@ func TestHealthStopsEarlyWhenServiceNotRunning(t *testing.T) {
 	e.Services = inactive{e.Services}
 	e.Probe = refused
 	e.HealthBudget = 10 * time.Second
+	e.NotRunningGrace = 20 * time.Millisecond
 
 	start := time.Now()
 	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
@@ -96,6 +97,88 @@ func TestHealthStopsEarlyWhenServiceNotRunning(t *testing.T) {
 	assert.False(t, r.OK)
 	assert.Equal(t, "not running", r.Reason)
 	assert.Less(t, time.Since(start), time.Second, "a stopped service is not waited for")
+}
+
+// startsLate reports a service stopped for its first few checks, the way a
+// unit looks while systemd waits to restart it after a startup crash.
+type startsLate struct {
+	services.Manager
+
+	stopped atomic.Int32
+}
+
+func (m *startsLate) Active(context.Context, string) (bool, error) {
+	return m.stopped.Add(-1) < 0, nil
+}
+
+func TestHealthRidesOutAnAutoRestart(t *testing.T) {
+	e := newHarness(t, true).e
+	m := &startsLate{Manager: e.Services}
+	m.stopped.Store(3)
+	e.Services = m
+	e.NotRunningGrace = time.Second
+	e.HealthBudget = 10 * time.Second
+
+	var calls atomic.Int32
+
+	e.Probe = func(context.Context, string) error {
+		if calls.Add(1) <= 4 {
+			return errors.New("connection refused")
+		}
+
+		return nil
+	}
+
+	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+
+	assert.True(t, r.OK, "stopped for less than the grace, then healthy: %+v", r)
+}
+
+// A deadline that cuts systemctl short makes the service look stopped; that
+// answer must not count.
+func TestHealthIgnoresAnActiveCheckCutOffByTheDeadline(t *testing.T) {
+	e := newHarness(t, true).e
+	e.Services = inactive{e.Services}
+	e.NotRunningGrace = 5 * time.Millisecond
+	e.HealthBudget = 30 * time.Millisecond
+
+	var calls atomic.Int32
+
+	e.Probe = func(ctx context.Context, _ string) error {
+		if calls.Add(1) == 1 {
+			return errors.New("connection refused")
+		}
+
+		<-ctx.Done()
+
+		return errors.New("timed out")
+	}
+
+	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+
+	assert.Equal(t, "timed out", r.Reason)
+}
+
+func TestHealthSharesOneBudget(t *testing.T) {
+	e := newHarness(t, true).e
+	e.Probe = refused
+	e.HealthBudget = 50 * time.Millisecond
+
+	start := time.Now()
+	res := e.checkHealth(context.Background(), map[string]string{
+		repos.Agent: "http://127.0.0.1:19092/health",
+		repos.Chat:  "http://127.0.0.1:19093/health",
+	})
+	took := time.Since(start)
+
+	require.Len(t, res, 2)
+
+	for repo, r := range res {
+		assert.False(t, r.OK, repo)
+		assert.Equal(t, "connection refused", r.Reason, repo)
+	}
+
+	assert.Less(t, took, 100*time.Millisecond, "both wait within the one budget")
 }
 
 func TestHealthNoPortFailsFast(t *testing.T) {

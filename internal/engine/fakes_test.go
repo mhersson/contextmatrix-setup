@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -61,6 +62,7 @@ type fakeImages struct {
 	built      []string
 	removed    []string
 	fail       bool
+	removeFail bool
 	dockerHost string
 }
 
@@ -90,6 +92,10 @@ func (f *fakeImages) Build(_ context.Context, _, repo, commit string, out io.Wri
 }
 
 func (f *fakeImages) RemoveImage(_ context.Context, ref string) error {
+	if f.removeFail {
+		return errors.New("image is in use")
+	}
+
 	f.removed = append(f.removed, ref)
 
 	return nil

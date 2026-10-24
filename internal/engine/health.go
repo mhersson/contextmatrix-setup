@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	defaultHealthBudget   = 60 * time.Second
-	defaultHealthInterval = time.Second
-	probeTimeout          = 2 * time.Second
-	reasonNotRunning      = "not running"
+	defaultHealthBudget    = 60 * time.Second
+	defaultHealthInterval  = time.Second
+	defaultNotRunningGrace = 15 * time.Second
+	probeTimeout           = 2 * time.Second
+	reasonNotRunning       = "not running"
 )
 
 // healthResult is one restarted service's health. Checked is false when no
@@ -48,41 +49,43 @@ func healthURL(repo string, tree configsync.Tree) (string, error) {
 	return fmt.Sprintf("http://127.0.0.1:%d%s", port, path), nil
 }
 
-// checkHealth waits for every service in urls (repo -> health URL) at once.
+// checkHealth waits for every service in urls (repo -> health URL) at once,
+// within one budget.
 func (e *Engine) checkHealth(ctx context.Context, urls map[string]string) map[string]healthResult {
+	deadline := e.healthDeadline()
+	chans := make(map[string]chan healthResult, len(urls))
+
+	for repo, url := range urls {
+		ch := make(chan healthResult, 1)
+		chans[repo] = ch
+
+		go func() { ch <- e.waitUntil(ctx, deadline, repo, url) }()
+	}
+
 	out := make(map[string]healthResult, len(urls))
 
-	for repo, ch := range e.startHealth(ctx, urls) {
+	for repo, ch := range chans {
 		out[repo] = <-ch
 	}
 
 	return out
 }
 
-// startHealth probes every url concurrently and returns a channel per repo
-// that yields its result, so a caller can report each as it lands. One
-// budget covers the whole set.
-func (e *Engine) startHealth(ctx context.Context, urls map[string]string) map[string]<-chan healthResult {
-	deadline := time.Now().Add(cmp.Or(e.HealthBudget, defaultHealthBudget))
-	out := make(map[string]<-chan healthResult, len(urls))
-
-	for repo, url := range urls {
-		ch := make(chan healthResult, 1)
-		out[repo] = ch
-
-		go func() {
-			ctx, cancel := context.WithDeadline(ctx, deadline)
-			defer cancel()
-
-			ch <- e.waitHealthy(ctx, repo, url)
-		}()
-	}
-
-	return out
+// healthDeadline ends the one budget that a set of health waits shares.
+func (e *Engine) healthDeadline() time.Time {
+	return time.Now().Add(cmp.Or(e.HealthBudget, defaultHealthBudget))
 }
 
-// waitHealthy probes url until it answers, the service is seen stopped, or
-// ctx ends; the last probe error is the reason.
+func (e *Engine) waitUntil(ctx context.Context, deadline time.Time, repo, url string) healthResult {
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	return e.waitHealthy(ctx, repo, url)
+}
+
+// waitHealthy probes url until it answers, the service has stayed stopped
+// past the grace, or ctx ends; the last probe error is the reason. The
+// grace lets systemd's Restart=on-failure bring back a startup crash.
 func (e *Engine) waitHealthy(ctx context.Context, repo, url string) healthResult {
 	probe := e.Probe
 	if probe == nil {
@@ -90,7 +93,10 @@ func (e *Engine) waitHealthy(ctx context.Context, repo, url string) healthResult
 	}
 
 	interval := cmp.Or(e.HealthInterval, defaultHealthInterval)
+	grace := cmp.Or(e.NotRunningGrace, defaultNotRunningGrace)
 	start := time.Now()
+
+	var stoppedSince time.Time
 
 	for {
 		err := probe(ctx, url)
@@ -98,8 +104,17 @@ func (e *Engine) waitHealthy(ctx context.Context, repo, url string) healthResult
 			return healthResult{Checked: true, OK: true, After: time.Since(start)}
 		}
 
-		// An error here says nothing about the service, so keep probing.
-		if active, aerr := e.Services.Active(ctx, repo); aerr == nil && !active {
+		active, aerr := e.Services.Active(ctx, repo)
+
+		switch {
+		case aerr != nil, ctx.Err() != nil:
+			// A failed check, or one the deadline cut short, says nothing
+			// about the service.
+		case active:
+			stoppedSince = time.Time{}
+		case stoppedSince.IsZero():
+			stoppedSince = time.Now()
+		case time.Since(stoppedSince) > grace:
 			return healthResult{Checked: true, After: time.Since(start), Reason: reasonNotRunning}
 		}
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -148,14 +149,22 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			old := st.Images[family]
 
 			// An install made before the variants existed recorded only the
-			// default image; build once so project overrides can resolve.
-			missingVariants := old.Tag != "" && len(old.Variants) == 0
-			if !moved[repo] && !dockerAppeared && !missingVariants {
+			// default image; build once so project overrides can resolve. No
+			// image at all means a failed build or a lost record: build it.
+			missingImage := old.Tag == ""
+			missingVariants := !missingImage && len(old.Variants) == 0
+
+			if !moved[repo] && !dockerAppeared && !missingImage && !missingVariants {
 				continue
 			}
 
 			var notes []note
-			if missingVariants && !moved[repo] {
+
+			switch {
+			case moved[repo] || dockerAppeared:
+			case missingImage:
+				notes = append(notes, note{repo, "worker image missing: built at the recorded commit"})
+			case missingVariants:
 				notes = append(notes, note{repo, "variant images missing: built at the recorded commit"})
 			}
 
@@ -167,7 +176,13 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			if err != nil {
 				s.Fail("docker build failed")
 				showFailure(c, s, family+" build failed")
-				printNotes(c, append(notes, note{repo, fmt.Sprintf("image build failed, keeping %s: %v", oldTags[repo], err)})...)
+
+				failed := fmt.Sprintf("image build failed: %v", err)
+				if old.Tag != "" {
+					failed = fmt.Sprintf("image build failed, keeping %s: %v", old.Tag, err)
+				}
+
+				printNotes(c, append(notes, note{repo, failed})...)
 
 				buildFailed[repo] = true
 
@@ -313,9 +328,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	github := githubConfigured(results[repos.Server].Tree)
 
 	var (
-		rows       []serviceResult
-		restarted  = map[string]bool{}
-		restartErr = map[string]error{}
+		rows    []serviceResult
+		restart = map[string]bool{}
 	)
 
 	for _, repo := range repos.Apps {
@@ -327,6 +341,10 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		row := serviceResult{Repo: repo, Running: repos.Short(st.Repos[repo].Commit), Image: e.workerImage(st, repo)}
 
 		switch {
+		case buildFailed[repo] && oldTags[repo] == "":
+			// Without an image the backend never ran, so nothing is kept.
+			row.Result, row.Problem, row.Running = "✗ not started", true, ""
+			row.Note = "its worker image did not build, so it was not started. The next update builds it."
 		case buildFailed[repo]:
 			row.Result, row.Problem, row.Kept = "● kept", true, true
 			row.Note = fmt.Sprintf("keeps running %s: its worker image did not build, so it was not restarted. The next update retries it.", row.Running)
@@ -343,28 +361,25 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 			// The old process runs until the user restarts it by hand.
 			row.Result = "start by hand"
 		default:
-			if err := e.Services.Restart(ctx, repo); err != nil {
-				restartErr[repo] = err
-				row.Result, row.Problem = "✗ restart failed", true
-				row.Note = strings.TrimSpace(err.Error() + "\n" + e.recentLogs(ctx, repo))
-
-				break
-			}
-
-			restarted[repo] = true
-			row.Result, row.Running = "✓ restarted", repos.Short(heads[repo])
-
-			if old := oldTags[repo]; old != "" && imageChanged[repo] {
-				if err := e.Images.RemoveImage(ctx, old); err != nil {
-					printNotes(c, note{repo, fmt.Sprintf("could not remove old image %s: %v", old, err)})
-				}
-			}
+			restart[repo] = true
 		}
 
 		rows = append(rows, row)
 	}
 
-	e.reportRestarts(ctx, c, rows, restarted, restartErr, results)
+	var removeNotes []note
+
+	e.restartServices(ctx, c, rows, restart, results, func(r *serviceResult) {
+		r.Running = repos.Short(heads[r.Repo])
+
+		if old := oldTags[r.Repo]; old != "" && imageChanged[r.Repo] {
+			if err := e.Images.RemoveImage(ctx, old); err != nil {
+				removeNotes = append(removeNotes, note{r.Repo, fmt.Sprintf("could not remove old image %s: %v", old, err)})
+			}
+		}
+	})
+
+	printNotes(c, removeNotes...)
 
 	if len(rows) > 0 {
 		c.Println(renderResult(c.Theme(), rows, e.Host.Docker))
@@ -428,59 +443,79 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	return nil
 }
 
-// reportRestarts gives every restart attempt its step line in table order.
-// The restarted services are probed together, and each line waits for its
-// own result, so the screen shows which one is still coming up.
-func (e *Engine) reportRestarts(ctx context.Context, c *ui.Console, rows []serviceResult, restarted map[string]bool, restartErr map[string]error, results map[string]configResult) {
+// restartServices restarts every row in restart and gives each its step
+// line, in table order. The restarts run one after another in the
+// background, and each service is probed as soon as it is back, so the
+// probes overlap within one budget while a step stays live until its own
+// service is restarted and checked. restarted runs for each success once
+// its step has ended.
+func (e *Engine) restartServices(ctx context.Context, c *ui.Console, rows []serviceResult, restart map[string]bool, results map[string]configResult, restarted func(r *serviceResult)) {
+	var order []string
+
 	urls := map[string]string{}
 	health := map[string]healthResult{}
 
-	for repo := range restarted {
+	for _, r := range rows {
+		if !restart[r.Repo] {
+			continue
+		}
+
+		order = append(order, r.Repo)
+
 		if e.SkipHealth {
-			health[repo] = healthResult{Reason: "not checked"}
+			health[r.Repo] = healthResult{Reason: "not checked"}
 
 			continue
 		}
 
-		url, err := healthURL(repo, results[repo].Tree)
+		url, err := healthURL(r.Repo, results[r.Repo].Tree)
 		if err != nil {
-			health[repo] = healthResult{Checked: true, Reason: err.Error()}
+			health[r.Repo] = healthResult{Checked: true, Reason: err.Error()}
 
 			continue
 		}
 
-		urls[repo] = url
+		urls[r.Repo] = url
 	}
 
-	waits := e.startHealth(ctx, urls)
+	var outcomes map[string]<-chan restartOutcome
 
 	for i := range rows {
 		r := &rows[i]
-
-		if err := restartErr[r.Repo]; err != nil {
-			c.Start("restart", r.Repo, "").Fail(err.Error())
-
+		if !restart[r.Repo] {
 			continue
 		}
 
-		if !restarted[r.Repo] {
-			continue
-		}
-
-		ch, probing := waits[r.Repo]
+		_, probing := urls[r.Repo]
 
 		detail := ""
 		if probing {
-			detail = "waiting for health"
+			detail = "with health check"
 		}
 
 		s := c.Start("restart", r.Repo, detail)
 
-		if probing {
-			health[r.Repo] = <-ch
+		// Started after the first step, so that step covers its restart.
+		if outcomes == nil {
+			outcomes = e.restartInOrder(ctx, order, urls)
 		}
 
+		o := <-outcomes[r.Repo]
+		if o.err != nil {
+			s.Fail(o.err.Error())
+
+			r.Result, r.Problem = "✗ restart failed", true
+			r.Note = strings.TrimSpace(o.err.Error() + "\n" + e.recentLogs(ctx, r.Repo))
+
+			continue
+		}
+
+		r.Result = "✓ restarted"
 		r.Health = health[r.Repo]
+
+		if probing {
+			r.Health = o.health
+		}
 
 		switch h := r.Health; {
 		case h.OK:
@@ -490,17 +525,63 @@ func (e *Engine) reportRestarts(ctx context.Context, c *ui.Console, rows []servi
 
 			r.Problem = true
 
-			if h.Reason != reasonNotRunning {
-				continue
-			}
-
-			if logs := strings.TrimSpace(e.recentLogs(ctx, r.Repo)); logs != "" {
-				r.Note = "recent log:\n" + logs
+			if h.Reason == reasonNotRunning {
+				if logs := strings.TrimSpace(e.recentLogs(ctx, r.Repo)); logs != "" {
+					r.Note = "recent log:\n" + logs
+				}
 			}
 		default:
 			s.Done("restarted")
 		}
+
+		restarted(r)
 	}
+}
+
+// restartOutcome is a service's restart error, or its health once back.
+type restartOutcome struct {
+	err    error
+	health healthResult
+}
+
+// restartInOrder restarts order one service at a time in the background
+// and probes each one in urls as soon as it is back. The health budget
+// starts with the first probe and covers them all.
+func (e *Engine) restartInOrder(ctx context.Context, order []string, urls map[string]string) map[string]<-chan restartOutcome {
+	chans := make(map[string]chan restartOutcome, len(order))
+	out := make(map[string]<-chan restartOutcome, len(order))
+
+	for _, repo := range order {
+		ch := make(chan restartOutcome, 1)
+		chans[repo], out[repo] = ch, ch
+	}
+
+	go func() {
+		var deadline time.Time
+
+		for _, repo := range order {
+			if err := e.Services.Restart(ctx, repo); err != nil {
+				chans[repo] <- restartOutcome{err: err}
+
+				continue
+			}
+
+			url, ok := urls[repo]
+			if !ok {
+				chans[repo] <- restartOutcome{}
+
+				continue
+			}
+
+			if deadline.IsZero() {
+				deadline = e.healthDeadline()
+			}
+
+			go func() { chans[repo] <- restartOutcome{health: e.waitUntil(ctx, deadline, repo, url)} }()
+		}
+	}()
+
+	return out
 }
 
 // workerImage is the image a docker-backed service runs, without the

@@ -76,6 +76,7 @@ func TestInstallUpdateCycle(t *testing.T) {
 	assert.NotContains(t, log, "make docker-worker-variants contextmatrix-chat")
 	assert.Contains(t, log, "systemctl --user restart contextmatrix-agent")
 	assert.NotContains(t, log, "systemctl --user restart contextmatrix-chat")
+	assert.Contains(t, out, "not checked", "the health budget env turns the probes off")
 	assert.Contains(t, log, "docker rmi contextmatrix-agent-worker:")
 
 	// Manual edit survives; stale key dropped; server restarted. Replace the

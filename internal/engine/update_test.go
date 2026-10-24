@@ -17,6 +17,7 @@ import (
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
+	"github.com/mhersson/contextmatrix-setup/internal/services"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 	"github.com/mhersson/contextmatrix-setup/internal/ui"
 )
@@ -647,6 +648,7 @@ func TestUpdateStoppedServiceShowsItsLogs(t *testing.T) {
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
 	h.e.Services = inactive{h.e.Services}
 	h.e.Probe = refused
+	h.e.NotRunningGrace = time.Millisecond
 	h.runner.On("journalctl", "--user", "-u", repos.Agent).Return("panic: bad config\n", "", 0)
 
 	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
@@ -692,4 +694,91 @@ func TestUpdateSkipHealthShowsNotChecked(t *testing.T) {
 
 	assert.Zero(t, calls.Load())
 	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "not checked")
+}
+
+// A docker that appears with a broken build leaves no image recorded; the
+// next update builds it although no repo moved.
+func TestUpdateRetriesAFailedImageBuildAfterDockerAppeared(t *testing.T) {
+	h := installed(t, false)
+	h.e.Host.Docker = true
+	h.images.fail = true
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 2, pe.N, "agent and chat")
+	assert.NotContains(t, restarts(h), repos.Agent)
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "not started")
+	assert.NotContains(t, h.out.String(), "keeps running", "a backend that never ran without docker keeps nothing")
+
+	h.images.fail = false
+	h.out.b = nil
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{"contextmatrix-agent-worker:bbbbbbb", "contextmatrix-chat-worker:ccccccc"}, h.images.built)
+	assert.Contains(t, restarts(h), repos.Agent)
+	assert.Contains(t, restarts(h), repos.Chat)
+}
+
+// clock is a console clock that only a test moves.
+type clock struct{ ns atomic.Int64 }
+
+func (c *clock) now() time.Time { return time.Unix(0, c.ns.Load()) }
+
+// slowRestart takes five seconds of the console clock to restart a service.
+type slowRestart struct {
+	services.Manager
+
+	clock *clock
+}
+
+func (m slowRestart) Restart(ctx context.Context, name string) error {
+	m.clock.ns.Add(int64(5 * time.Second))
+
+	return m.Manager.Restart(ctx, name)
+}
+
+func TestUpdateRestartStepCoversTheRestart(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+
+	clk := &clock{}
+	h.e.Services = slowRestart{Manager: h.e.Services, clock: clk}
+
+	var screen bytes.Buffer
+
+	c := ui.NewConsole(&screen, ui.NewTheme(ui.Mode{Plain: true, Width: 100}), nil, "")
+	c.Now = clk.now
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true, UI: c}))
+	c.Close()
+
+	var restart []string
+
+	for _, l := range stepLines(screen.String(), "✓") {
+		if f := strings.Fields(l); f[1] == "restart" {
+			restart = append(restart, l)
+		}
+	}
+
+	require.Len(t, restart, 1)
+	assert.True(t, strings.HasSuffix(restart[0], "5.0s"), "the step was running while the service restarted: %q", restart[0])
+}
+
+func TestUpdateRemovalNoteFollowsTheRestartSteps(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.images.removeFail = true
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	restart := stepLines(out, "✓")
+	note := strings.Index(out, "could not remove old image contextmatrix-agent-worker:bbbbbbb")
+
+	require.NotEmpty(t, restart)
+	require.GreaterOrEqual(t, note, 0)
+	assert.Greater(t, note, strings.Index(out, " restart  "+repos.Agent), "the note comes after the restart step it belongs to")
 }

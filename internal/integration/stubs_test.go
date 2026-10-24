@@ -204,6 +204,9 @@ func (e *env) run(args ...string) (string, error) {
 		"STUB_LOG=" + e.log,
 		"CONTEXTMATRIX_SETUP_REPO_BASE=" + e.origins,
 		"CONTEXTMATRIX_SETUP_REEXEC=1",
+		// Nothing listens on the stub apps' ports; a probe would reach
+		// whatever else does.
+		"CONTEXTMATRIX_SETUP_HEALTH_BUDGET=0",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",
 	}
