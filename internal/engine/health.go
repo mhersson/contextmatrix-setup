@@ -49,30 +49,6 @@ func healthURL(repo string, tree configsync.Tree) (string, error) {
 	return fmt.Sprintf("http://127.0.0.1:%d%s", port, path), nil
 }
 
-// checkHealth waits for every service in urls (repo -> health URL) at once,
-// within one budget.
-func (e *Engine) checkHealth(ctx context.Context, urls map[string]string) map[string]healthResult {
-	budget, arm := e.healthBudget(ctx)
-	arm()
-
-	chans := make(map[string]chan healthResult, len(urls))
-
-	for repo, url := range urls {
-		ch := make(chan healthResult, 1)
-		chans[repo] = ch
-
-		go func(ctx context.Context) { ch <- e.waitHealthy(ctx, repo, url) }(budget)
-	}
-
-	out := make(map[string]healthResult, len(urls))
-
-	for repo, ch := range chans {
-		out[repo] = <-ch
-	}
-
-	return out
-}
-
 // healthBudget returns a context for a set of health waits and arm, which
 // starts the budget: once it has run, the context ends with
 // context.DeadlineExceeded as its cause. Waits may start before arm.

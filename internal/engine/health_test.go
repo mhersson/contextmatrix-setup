@@ -22,8 +22,16 @@ import (
 
 func refused(context.Context, string) error { return errors.New("connection refused") }
 
-func agentURL() map[string]string {
-	return map[string]string{repos.Agent: "http://127.0.0.1:19092/health"}
+// restartAgent restarts the agent and waits for its health the way Update
+// does, within the health budget.
+func restartAgent(t *testing.T, e *Engine) healthResult {
+	t.Helper()
+
+	urls := map[string]string{repos.Agent: "http://127.0.0.1:19092/health"}
+	o := <-e.restartInOrder(context.Background(), []string{repos.Agent}, urls)[repos.Agent]
+	require.NoError(t, o.err)
+
+	return o.health
 }
 
 func TestHealthHealthyAfterRetries(t *testing.T) {
@@ -39,7 +47,7 @@ func TestHealthHealthyAfterRetries(t *testing.T) {
 		return nil
 	}
 
-	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+	r := restartAgent(t, e)
 
 	assert.True(t, r.Checked)
 	assert.True(t, r.OK)
@@ -68,7 +76,7 @@ func TestHealthTimesOutWithLastError(t *testing.T) {
 			e.HealthBudget = 20 * time.Millisecond
 
 			start := time.Now()
-			r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+			r := restartAgent(t, e)
 
 			assert.True(t, r.Checked)
 			assert.False(t, r.OK)
@@ -91,7 +99,7 @@ func TestHealthStopsEarlyWhenServiceNotRunning(t *testing.T) {
 	e.NotRunningGrace = 20 * time.Millisecond
 
 	start := time.Now()
-	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+	r := restartAgent(t, e)
 
 	assert.True(t, r.Checked)
 	assert.False(t, r.OK)
@@ -129,7 +137,7 @@ func TestHealthRidesOutAnAutoRestart(t *testing.T) {
 		return nil
 	}
 
-	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+	r := restartAgent(t, e)
 
 	assert.True(t, r.OK, "stopped for less than the grace, then healthy: %+v", r)
 }
@@ -154,31 +162,9 @@ func TestHealthIgnoresAnActiveCheckCutOffByTheDeadline(t *testing.T) {
 		return errors.New("timed out")
 	}
 
-	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+	r := restartAgent(t, e)
 
 	assert.Equal(t, "timed out", r.Reason)
-}
-
-func TestHealthSharesOneBudget(t *testing.T) {
-	e := newHarness(t, true).e
-	e.Probe = refused
-	e.HealthBudget = 200 * time.Millisecond
-
-	start := time.Now()
-	res := e.checkHealth(context.Background(), map[string]string{
-		repos.Agent: "http://127.0.0.1:19092/health",
-		repos.Chat:  "http://127.0.0.1:19093/health",
-	})
-	took := time.Since(start)
-
-	require.Len(t, res, 2)
-
-	for repo, r := range res {
-		assert.False(t, r.OK, repo)
-		assert.Equal(t, "connection refused", r.Reason, repo)
-	}
-
-	assert.Less(t, took, 400*time.Millisecond, "both wait within the one budget")
 }
 
 // flapping is stopped, then briefly back, then stopped again: two stretches
@@ -211,7 +197,7 @@ func TestHealthGraceRestartsWhenTheServiceComesBack(t *testing.T) {
 		return nil
 	}
 
-	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+	r := restartAgent(t, e)
 
 	assert.True(t, r.OK, "neither stopped stretch outlasted the grace: %+v", r)
 }
