@@ -41,7 +41,6 @@ func TestBadgeHasFixedWidth(t *testing.T) {
 		for _, k := range kinds {
 			assert.Equal(t, BadgeWidth, lipgloss.Width(th.Badge(k)), "%q dark=%v", k, dark)
 			assert.NotContains(t, th.Badge(k), "\n", "%q dark=%v", k, dark)
-			assert.NotContains(t, th.Badge(k), "\n", "%q dark=%v", k, dark)
 		}
 	}
 }
