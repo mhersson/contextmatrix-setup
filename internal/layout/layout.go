@@ -109,6 +109,8 @@ func (l Layout) ArchitectStateDir() string { return filepath.Join(l.StateDir, "a
 
 func (l Layout) SrcDir(repo string) string { return filepath.Join(l.CacheDir, "src", repo) }
 
+func (l Layout) LogsDir() string { return filepath.Join(l.CacheDir, "logs") }
+
 func (l Layout) SystemdUserDir() string { return filepath.Join(l.xdgConfig, "systemd", "user") }
 
 func (l Layout) LaunchAgentsDir() string { return filepath.Join(l.Home, "Library", "LaunchAgents") }
