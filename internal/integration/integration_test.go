@@ -295,3 +295,19 @@ func TestUpdateAddsTheArchitectToAnOlderInstall(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, st.Repos["contextmatrix-architect"].Commit)
 }
+
+func TestUpdatePlainOutputHasNoEscapes(t *testing.T) {
+	e := newEnv(t)
+
+	out, err := e.run("install", "--yes", "--auth-mode", "multi", "--github-mode", "pat", "--github-pat", "tok", "--openrouter-key", "or")
+	require.NoError(t, err, out)
+
+	e.commit("contextmatrix-agent", "x.go", "package x\n")
+
+	out, err = e.run("update", "--yes")
+	require.NoError(t, err, out)
+
+	assert.NotContains(t, out, "\x1b")
+	assert.Contains(t, out, "fetch")
+	assert.Contains(t, out, "restart")
+}

@@ -81,6 +81,23 @@ func (c *Console) Println(s string) {
 	}
 }
 
+// Prompt writes s without a line break, for a question answered on the same
+// row, and logs it as a line.
+func (c *Console) Prompt(s string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.log != nil {
+		_, _ = io.WriteString(c.log, ansi.Strip(s)+"\n")
+	}
+
+	if c.live {
+		c.clearLocked()
+	}
+
+	c.writeOut(c.t.Output(s))
+}
+
 // Start begins a step. Only one step runs at a time: a step still running
 // is first finished as done with no detail.
 func (c *Console) Start(verb, target, detail string) *Step {

@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
+	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/selfupdate"
 	"github.com/mhersson/contextmatrix-setup/internal/ui"
@@ -32,8 +35,21 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			c := ui.NewConsole(e.Out, ui.NewTheme(ui.Mode{Plain: true, Width: 100}), nil, "")
-			defer c.Close()
+			mode := ui.Mode{Plain: true, Width: 100}
+			if cmd.OutOrStdout() == io.Writer(os.Stdout) {
+				mode = ui.Detect(os.Stdout, os.Getenv)
+			}
+
+			c, closeConsole, err := newUpdateConsole(e.Out, mode, e.L, os.Getenv, time.Now())
+			if err != nil {
+				return err
+			}
+
+			defer closeConsole()
+
+			if os.Getenv(selfupdate.EnvMarker) == "" {
+				c.Println(c.Theme().Brand(" ContextMatrix setup") + c.Theme().Dim(" · update"))
+			}
 
 			if !noSelf {
 				opts := selfupdate.Options{L: e.L, R: e.R, Git: e.Git, Out: e.Out, UI: c, Args: os.Args}
@@ -48,7 +64,7 @@ func newUpdateCmd() *cobra.Command {
 				}
 			}
 
-			return e.Update(ctx, engine.UpdateOptions{Yes: yes, Confirm: confirmPrompt(cmd), UI: c})
+			return e.Update(ctx, engine.UpdateOptions{Yes: yes, Confirm: updateConfirm(c, os.Stdin), UI: c})
 		},
 	}
 
@@ -78,4 +94,66 @@ func healthFromEnv(e *engine.Engine, getenv func(string) string) error {
 	}
 
 	return nil
+}
+
+// newUpdateConsole builds the update console. Only a styled terminal run gets
+// a log; a re-exec child appends to the parent's via CONTEXTMATRIX_SETUP_LOG.
+func newUpdateConsole(out io.Writer, m ui.Mode, l layout.Layout, getenv func(string) string, now time.Time) (*ui.Console, func(), error) {
+	th := ui.NewTheme(m)
+
+	if !m.TTY || m.Plain {
+		c := ui.NewConsole(out, th, nil, "")
+
+		return c, c.Close, nil
+	}
+
+	var (
+		f   *os.File
+		err error
+	)
+
+	path := getenv(logEnv)
+	if path != "" {
+		f, err = ui.AppendLog(path)
+	} else {
+		f, err = ui.OpenLog(l.LogsDir(), now, 10)
+		if err == nil {
+			path = f.Name()
+			// The re-exec child inherits this.
+			err = os.Setenv(logEnv, path)
+		}
+	}
+
+	if err != nil {
+		if f != nil {
+			_ = f.Close()
+		}
+
+		return nil, nil, fmt.Errorf("open update log: %w", err)
+	}
+
+	c := ui.NewConsole(out, th, f, layout.Tilde(l, path))
+
+	return c, func() {
+		c.Close()
+		_ = f.Close()
+	}, nil
+}
+
+const logEnv = "CONTEXTMATRIX_SETUP_LOG"
+
+// updateConfirm asks the update question on the console; an empty or
+// unreadable answer means yes.
+func updateConfirm(c *ui.Console, in io.Reader) func(string) bool {
+	return func(string) bool {
+		c.Prompt(" " + c.Theme().Accent("?") + " Apply these updates? [Y/n] ")
+
+		var answer string
+
+		if _, err := fmt.Fscanln(in, &answer); err != nil && !errors.Is(err, os.ErrClosed) {
+			return true
+		}
+
+		return answer == "" || answer == "y" || answer == "Y"
+	}
 }
