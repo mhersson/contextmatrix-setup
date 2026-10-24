@@ -116,11 +116,43 @@ func TestUpdateBuildsMissingVariants(t *testing.T) {
 	assert.Contains(t, h.out.String(), "variant images missing")
 
 	st, _, _ = state.Load(h.e.L.StateFile())
-	assert.Len(t, st.Images["contextmatrix-agent-worker"].Variants, 3)
+	assert.Len(t, st.Images["contextmatrix-agent-worker"].Variants, 4)
 
 	h.images.built = nil
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
 	assert.Empty(t, h.images.built, "recorded variants are not rebuilt")
+}
+
+// A record made before jvm-node was tracked holds the other variants; the
+// image already exists, so it is recorded at the next build, not by an
+// extra one.
+func TestUpdateRecordsUntrackedVariantAtNextBuild(t *testing.T) {
+	h := installed(t, true)
+
+	st, _, err := state.Load(h.e.L.StateFile())
+	require.NoError(t, err)
+
+	for family, img := range st.Images {
+		delete(img.Variants, "jvm-node")
+		st.Images[family] = img
+	}
+
+	require.NoError(t, st.Save(h.e.L.StateFile()))
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+	assert.Empty(t, h.images.built, "a partial record builds nothing")
+
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.git.logs["contextmatrix-agent"] = "b999999 fix(agent): something\n"
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	st, _, _ = state.Load(h.e.L.StateFile())
+	assert.Equal(t, "sha256:b9999999999-jvm-node", st.Images["contextmatrix-agent-worker"].Variants["jvm-node"])
+	assert.NotContains(t, st.Images["contextmatrix-chat-worker"].Variants, "jvm-node", "chat did not move, so it waits for its own build")
+	assert.Equal(t, []string{
+		"sha256:bbbbbbb2222-go-node",
+		"sha256:bbbbbbb2222-python",
+		"contextmatrix-agent-worker:bbbbbbb",
+	}, h.images.removed, "no ID was recorded for the replaced jvm-node image, so nothing is removed for it")
 }
 
 func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
@@ -144,6 +176,7 @@ func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
 	assert.Equal(t, []string{
 		"sha256:bbbbbbb2222-go-node",
 		"sha256:bbbbbbb2222-python",
+		"sha256:bbbbbbb2222-jvm-node",
 		"contextmatrix-agent-worker:bbbbbbb",
 	}, h.images.removed, "replaced variants removed after the build, the old tag after restart, the unchanged rust variant kept")
 
@@ -277,12 +310,12 @@ func TestStatusAndUninstall(t *testing.T) {
 	assert.Equal(t, 19094, s.Ports["contextmatrix-architect"])
 	assert.True(t, s.Docker)
 	assert.Equal(t, "contextmatrix-agent-worker:bbbbbbb", s.Images["contextmatrix-agent-worker"])
-	assert.Equal(t, []string{"go-node", "python", "rust"}, s.Variants["contextmatrix-chat-worker"])
+	assert.Equal(t, []string{"go-node", "jvm-node", "python", "rust"}, s.Variants["contextmatrix-chat-worker"])
 
 	h.e.PrintStatus(s)
 	assert.Contains(t, h.out.String(), "18080")
 	assert.Contains(t, h.out.String(), "contextmatrix-chat-worker:ccccccc")
-	assert.Contains(t, h.out.String(), "variants: go-node python rust")
+	assert.Contains(t, h.out.String(), "variants: go-node jvm-node python rust")
 
 	require.NoError(t, h.e.Uninstall(context.Background()))
 

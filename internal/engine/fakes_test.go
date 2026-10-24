@@ -73,15 +73,14 @@ func (f *fakeImages) Build(_ context.Context, _, repo, commit string, out io.Wri
 	f.built = append(f.built, tag)
 	_, _ = io.WriteString(out, "built "+tag+"\n")
 
-	return images.Built{
-		Tag: tag,
-		ID:  "sha256:" + commit,
-		Variants: map[string]string{
-			"go-node": "sha256:" + commit + "-go-node",
-			"python":  "sha256:" + commit + "-python",
-			"rust":    "sha256:rust-static",
-		},
-	}, nil
+	variants := map[string]string{}
+	for _, v := range images.Variants {
+		variants[v] = "sha256:" + commit + "-" + v
+	}
+
+	variants["rust"] = "sha256:rust-static"
+
+	return images.Built{Tag: tag, ID: "sha256:" + commit, Variants: variants}, nil
 }
 
 func (f *fakeImages) RemoveImage(_ context.Context, ref string) error {
