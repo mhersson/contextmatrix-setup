@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
@@ -26,7 +27,9 @@ func (g fakeGit) Sync(_ context.Context, dir, _ string, _ io.Writer) (string, er
 
 func (g fakeGit) Head(context.Context, string) (string, error) { return g.head, nil }
 
-func (fakeGit) Log(context.Context, string, string, string) (string, error) { return "", nil }
+func (fakeGit) Changes(context.Context, string, string, string) ([]repos.Change, error) {
+	return nil, nil
+}
 
 func (fakeGit) PathChanged(context.Context, string, string, string, string) (bool, error) {
 	return false, nil

@@ -142,7 +142,7 @@ func TestUpdateRecordsUntrackedVariantAtNextBuild(t *testing.T) {
 	assert.Empty(t, h.images.built, "a partial record builds nothing")
 
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
-	h.git.logs["contextmatrix-agent"] = "b999999 fix(agent): something\n"
+	h.git.logs["contextmatrix-agent"] = []repos.Change{{SHA: "b9999999999", Title: "fix(agent): something", Commits: 1}}
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
 
 	st, _, _ = state.Load(h.e.L.StateFile())
@@ -158,7 +158,7 @@ func TestUpdateRecordsUntrackedVariantAtNextBuild(t *testing.T) {
 func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
 	h := installed(t, true)
 	h.git.heads["contextmatrix-agent"] = "b9999999999"
-	h.git.logs["contextmatrix-agent"] = "b999999 fix(agent): something\n"
+	h.git.logs["contextmatrix-agent"] = []repos.Change{{SHA: "b9999999999", Title: "fix(agent): something", Commits: 1}}
 
 	var summary string
 
@@ -170,7 +170,9 @@ func TestUpdateRebuildsMovedRepoAndRestartsIt(t *testing.T) {
 
 	require.NoError(t, h.e.Update(context.Background(), opts))
 
-	assert.Contains(t, summary, "fix(agent): something")
+	assert.Contains(t, summary, "something")
+	assert.Contains(t, summary, "fix")
+	assert.NotContains(t, summary, "\x1b")
 	assert.Equal(t, []string{"contextmatrix-agent-worker:b999999"}, h.images.built)
 	assert.Equal(t, []string{"contextmatrix-agent"}, restarts(h))
 	assert.Equal(t, []string{

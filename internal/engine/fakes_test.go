@@ -14,6 +14,7 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/host"
 	"github.com/mhersson/contextmatrix-setup/internal/images"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 	"github.com/mhersson/contextmatrix-setup/internal/services"
 )
@@ -23,7 +24,7 @@ import (
 type fakeGit struct {
 	heads   map[string]string
 	changed map[string]bool // path -> PathChanged answer
-	logs    map[string]string
+	logs    map[string][]repos.Change
 }
 
 func (g *fakeGit) Sync(_ context.Context, dir, _ string, _ io.Writer) (string, error) {
@@ -43,7 +44,7 @@ func (g *fakeGit) Head(_ context.Context, dir string) (string, error) {
 	return g.heads[filepath.Base(dir)], nil
 }
 
-func (g *fakeGit) Log(_ context.Context, dir, _, _ string) (string, error) {
+func (g *fakeGit) Changes(_ context.Context, dir, _, _ string) ([]repos.Change, error) {
 	return g.logs[filepath.Base(dir)], nil
 }
 
@@ -146,7 +147,7 @@ func newHarness(t *testing.T, docker bool) *harness {
 			"contextmatrix-chat": "ccccccc3333", "contextmatrix-architect": "ddddddd4444",
 		},
 		changed: map[string]bool{},
-		logs:    map[string]string{},
+		logs:    map[string][]repos.Change{},
 	}
 	img := &fakeImages{}
 	out := &bytesBuffer{}

@@ -17,7 +17,7 @@ import (
 type Git interface {
 	Sync(ctx context.Context, dir, url string, out io.Writer) (string, error)
 	Head(ctx context.Context, dir string) (string, error)
-	Log(ctx context.Context, dir, from, to string) (string, error)
+	Changes(ctx context.Context, dir, from, to string) ([]repos.Change, error)
 	PathChanged(ctx context.Context, dir, from, to, path string) (bool, error)
 }
 

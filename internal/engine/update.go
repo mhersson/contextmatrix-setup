@@ -3,15 +3,17 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/images"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
+	"github.com/mhersson/contextmatrix-setup/internal/ui"
 )
 
 type UpdateOptions struct {
@@ -41,7 +43,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 	moved := map[string]bool{}
 
-	var summary strings.Builder
+	var list []repoChanges
 
 	for _, repo := range repos.Apps {
 		old := st.Repos[repo].Commit
@@ -51,24 +53,26 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 		moved[repo] = true
 
-		if old == "" {
-			fmt.Fprintf(&summary, "%s new at %s\n", repo, repos.Short(heads[repo]))
-
-			continue
+		rc := repoChanges{Repo: repo, From: old, To: heads[repo], Web: repos.WebBase(e.repoURL(repo))}
+		if e.Host.Docker && needsDocker(repo) {
+			rc.Images = 1 + len(images.Variants)
 		}
 
-		log, err := e.Git.Log(ctx, e.L.SrcDir(repo), old, heads[repo])
-		if err != nil {
-			return err
+		if old != "" {
+			rc.Changes, rc.Err = e.Git.Changes(ctx, e.L.SrcDir(repo), old, heads[repo])
+			if repo == repos.Server {
+				rc.Skills, _ = e.Git.PathChanged(ctx, e.L.SrcDir(repo), old, heads[repo], "workflow-skills")
+			}
 		}
 
-		fmt.Fprintf(&summary, "%s %s..%s\n%s", repo, repos.Short(old), repos.Short(heads[repo]), log)
+		list = append(list, rc)
 	}
 
 	if len(moved) > 0 {
-		e.logf("%s", summary.String())
+		view := renderChanges(ui.NewTheme(ui.Mode{Plain: true, Width: 100}), list)
+		e.logf("%s", view)
 
-		if !opts.Yes && opts.Confirm != nil && !opts.Confirm(summary.String()) {
+		if !opts.Yes && opts.Confirm != nil && !opts.Confirm(ansi.Strip(view)) {
 			e.logf("update cancelled; nothing changed")
 
 			return nil

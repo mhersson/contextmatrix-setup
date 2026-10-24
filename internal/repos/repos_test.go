@@ -102,9 +102,12 @@ func TestSyncClonesThenUpdates(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, changed)
 
-	log, err := g.Log(context.Background(), dir, head1, head2)
+	changes, err := g.Changes(context.Background(), dir, head1, head2)
 	require.NoError(t, err)
-	assert.Contains(t, log, "add workflow-skills/a.md")
+	require.Len(t, changes, 1)
+	assert.Equal(t, head2, changes[0].SHA)
+	assert.Equal(t, "add workflow-skills/a.md", changes[0].Title)
+	assert.Equal(t, 1, changes[0].Commits)
 }
 
 func TestSyncDiscardsLocalChanges(t *testing.T) {
@@ -128,4 +131,61 @@ func TestURLAndShort(t *testing.T) {
 	assert.Equal(t, "https://github.com/mhersson/contextmatrix-agent.git", URL(Agent))
 	assert.Equal(t, "abc1234", Short("abc1234567890"))
 	assert.Equal(t, "abc", Short("abc"))
+}
+
+func TestParseFirstParent(t *testing.T) {
+	rec := func(sha, parents, author, subject, body string) string {
+		return sha + "\x1f" + parents + "\x1f" + author + "\x1f" + subject + "\x1f" + body + "\x1e\n"
+	}
+	raw := rec("a1", "p1 p2", "alice", "Merge pull request #52 from o/docs/x", "\ndocs(design): name it\n") +
+		rec("b2", "q1 q2", "bob", "Merge pull request #9 from o/dependabot/go_modules/x", "\nbuild(deps): bump x\n") +
+		rec("c3", "r1", "dependabot[bot]", "fix(web): y (#17)", "") +
+		rec("d4", "s1", "carol", "chore: z", "")
+
+	got := ParseFirstParent(raw)
+	require.Len(t, got, 4)
+	assert.Equal(t, Change{SHA: "a1", Parents: []string{"p1", "p2"}, PR: 52, Title: "docs(design): name it", Commits: 1}, got[0])
+	assert.Equal(t, 9, got[1].PR)
+	assert.True(t, got[1].Dependabot)
+	assert.Equal(t, "build(deps): bump x", got[1].Title)
+	assert.Equal(t, 17, got[2].PR)
+	assert.Equal(t, "fix(web): y", got[2].Title)
+	assert.True(t, got[2].Dependabot)
+	assert.Equal(t, 0, got[3].PR)
+	assert.Equal(t, "chore: z", got[3].Title)
+	assert.False(t, got[3].Dependabot)
+}
+
+func TestWebBase(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://github.com/o/r":       "https://github.com/o/r",
+		"https://github.com/o/r.git":   "https://github.com/o/r",
+		"ssh://git@github.com/o/r.git": "https://github.com/o/r",
+		"ssh://github.com/o/r.git":     "https://github.com/o/r",
+		"git@github.com:o/r.git":       "https://github.com/o/r",
+		"file:///origin/x":             "",
+		"https://gitlab.com/o/r.git":   "",
+		"/tmp/origin.git":              "",
+	} {
+		assert.Equal(t, want, WebBase(in), in)
+	}
+}
+
+func TestChangesCountsMergeCommits(t *testing.T) {
+	f := run.NewFake()
+	f.On("git", "log").Return("m1\x1fp1 p2\x1fal\x1fMerge pull request #5 from o/feat/x\x1f\nfeat: x\n\x1e\n", "", 0)
+	f.On("git", "rev-list", "--count", "p1..p2").Return("3\n", "", 0)
+
+	got, err := Git{R: f}.Changes(context.Background(), "/d", "a", "b")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, 3, got[0].Commits)
+}
+
+func TestChangesFailsOnUnreachableRange(t *testing.T) {
+	f := run.NewFake()
+	f.On("git", "log").Return("", "bad revision", 128)
+
+	_, err := Git{R: f}.Changes(context.Background(), "/d", "a", "b")
+	assert.ErrorContains(t, err, "bad revision")
 }
