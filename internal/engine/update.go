@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -546,7 +545,8 @@ type restartOutcome struct {
 
 // restartInOrder restarts order one service at a time in the background
 // and probes each one in urls as soon as it is back. The health budget
-// starts with the first probe and covers them all.
+// starts once the last restart has returned, so a slow stop cannot use up
+// a later service's wait.
 func (e *Engine) restartInOrder(ctx context.Context, order []string, urls map[string]string) map[string]<-chan restartOutcome {
 	chans := make(map[string]chan restartOutcome, len(order))
 	out := make(map[string]<-chan restartOutcome, len(order))
@@ -557,7 +557,7 @@ func (e *Engine) restartInOrder(ctx context.Context, order []string, urls map[st
 	}
 
 	go func() {
-		var deadline time.Time
+		budget, arm := e.healthBudget(ctx)
 
 		for _, repo := range order {
 			if err := e.Services.Restart(ctx, repo); err != nil {
@@ -573,12 +573,12 @@ func (e *Engine) restartInOrder(ctx context.Context, order []string, urls map[st
 				continue
 			}
 
-			if deadline.IsZero() {
-				deadline = e.healthDeadline()
-			}
-
-			go func() { chans[repo] <- restartOutcome{health: e.waitUntil(ctx, deadline, repo, url)} }()
+			go func(ctx context.Context) {
+				chans[repo] <- restartOutcome{health: e.waitHealthy(ctx, repo, url)}
+			}(budget)
 		}
+
+		arm()
 	}()
 
 	return out

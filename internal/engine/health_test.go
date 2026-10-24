@@ -162,7 +162,7 @@ func TestHealthIgnoresAnActiveCheckCutOffByTheDeadline(t *testing.T) {
 func TestHealthSharesOneBudget(t *testing.T) {
 	e := newHarness(t, true).e
 	e.Probe = refused
-	e.HealthBudget = 50 * time.Millisecond
+	e.HealthBudget = 200 * time.Millisecond
 
 	start := time.Now()
 	res := e.checkHealth(context.Background(), map[string]string{
@@ -178,7 +178,42 @@ func TestHealthSharesOneBudget(t *testing.T) {
 		assert.Equal(t, "connection refused", r.Reason, repo)
 	}
 
-	assert.Less(t, took, 100*time.Millisecond, "both wait within the one budget")
+	assert.Less(t, took, 400*time.Millisecond, "both wait within the one budget")
+}
+
+// flapping is stopped, then briefly back, then stopped again: two stretches
+// each shorter than the grace, together longer.
+type flapping struct {
+	services.Manager
+
+	start time.Time
+}
+
+func (m *flapping) Active(context.Context, string) (bool, error) {
+	d := time.Since(m.start)
+
+	return (d >= 70*time.Millisecond && d < 100*time.Millisecond) || d >= 170*time.Millisecond, nil
+}
+
+func TestHealthGraceRestartsWhenTheServiceComesBack(t *testing.T) {
+	e := newHarness(t, true).e
+	e.Services = &flapping{Manager: e.Services, start: time.Now()}
+	e.NotRunningGrace = 100 * time.Millisecond
+	e.HealthInterval = 2 * time.Millisecond
+	e.HealthBudget = 10 * time.Second
+
+	start := time.Now()
+	e.Probe = func(context.Context, string) error {
+		if time.Since(start) < 180*time.Millisecond {
+			return errors.New("connection refused")
+		}
+
+		return nil
+	}
+
+	r := e.checkHealth(context.Background(), agentURL())[repos.Agent]
+
+	assert.True(t, r.OK, "neither stopped stretch outlasted the grace: %+v", r)
 }
 
 func TestHealthNoPortFailsFast(t *testing.T) {
@@ -254,6 +289,16 @@ func TestHTTPProbe(t *testing.T) {
 	closed := "http://" + l.Addr().String() + "/health"
 	require.NoError(t, l.Close())
 	require.EqualError(t, httpProbe(context.Background(), closed), "connection refused")
+
+	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer hang.Close()
+
+	e := newHarness(t, true).e
+	e.HealthBudget = 20 * time.Millisecond
+
+	budget, arm := e.healthBudget(context.Background())
+	arm()
+	require.EqualError(t, httpProbe(budget, hang.URL+"/health"), "timed out", "the budget ending a probe reads as a timeout")
 }
 
 // resultRow returns the result table row naming repo, found below the

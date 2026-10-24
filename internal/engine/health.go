@@ -52,14 +52,16 @@ func healthURL(repo string, tree configsync.Tree) (string, error) {
 // checkHealth waits for every service in urls (repo -> health URL) at once,
 // within one budget.
 func (e *Engine) checkHealth(ctx context.Context, urls map[string]string) map[string]healthResult {
-	deadline := e.healthDeadline()
+	budget, arm := e.healthBudget(ctx)
+	arm()
+
 	chans := make(map[string]chan healthResult, len(urls))
 
 	for repo, url := range urls {
 		ch := make(chan healthResult, 1)
 		chans[repo] = ch
 
-		go func() { ch <- e.waitUntil(ctx, deadline, repo, url) }()
+		go func(ctx context.Context) { ch <- e.waitHealthy(ctx, repo, url) }(budget)
 	}
 
 	out := make(map[string]healthResult, len(urls))
@@ -71,16 +73,14 @@ func (e *Engine) checkHealth(ctx context.Context, urls map[string]string) map[st
 	return out
 }
 
-// healthDeadline ends the one budget that a set of health waits shares.
-func (e *Engine) healthDeadline() time.Time {
-	return time.Now().Add(cmp.Or(e.HealthBudget, defaultHealthBudget))
-}
+// healthBudget returns a context for a set of health waits and arm, which
+// starts the budget: once it has run, the context ends with
+// context.DeadlineExceeded as its cause. Waits may start before arm.
+func (e *Engine) healthBudget(ctx context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	budget := cmp.Or(e.HealthBudget, defaultHealthBudget)
 
-func (e *Engine) waitUntil(ctx context.Context, deadline time.Time, repo, url string) healthResult {
-	ctx, cancel := context.WithDeadline(ctx, deadline)
-	defer cancel()
-
-	return e.waitHealthy(ctx, repo, url)
+	return ctx, func() { time.AfterFunc(budget, func() { cancel(context.DeadlineExceeded) }) }
 }
 
 // waitHealthy probes url until it answers, the service has stayed stopped
@@ -161,6 +161,7 @@ func probeError(err error) error {
 	switch {
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return errors.New("connection refused")
+	// The budget's cancel cause is DeadlineExceeded, which net/http returns.
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
 		return errors.New("timed out")
 	}

@@ -782,3 +782,65 @@ func TestUpdateRemovalNoteFollowsTheRestartSteps(t *testing.T) {
 	require.GreaterOrEqual(t, note, 0)
 	assert.Greater(t, note, strings.Index(out, " restart  "+repos.Agent), "the note comes after the restart step it belongs to")
 }
+
+// slowAgentRestart takes longer than the health budget to restart the agent
+// and records when that restart returned.
+type slowAgentRestart struct {
+	services.Manager
+
+	delay    time.Duration
+	returned atomic.Int64
+}
+
+func (m *slowAgentRestart) Restart(ctx context.Context, name string) error {
+	if name == repos.Agent {
+		time.Sleep(m.delay)
+		defer m.returned.Store(time.Now().UnixNano())
+	}
+
+	return m.Manager.Restart(ctx, name)
+}
+
+// The budget starts once the last restart has returned, so a service that
+// is slow to restart is still probed, and the set ends a budget later.
+func TestUpdateHealthBudgetStartsAfterTheLastRestart(t *testing.T) {
+	const budget = 200 * time.Millisecond
+
+	h := installed(t, true)
+	h.git.heads["contextmatrix"] = "a9999999999"
+	h.git.heads["contextmatrix-agent"] = "b9999999999"
+	h.e.HealthBudget = budget
+
+	m := &slowAgentRestart{Manager: h.e.Services, delay: 300 * time.Millisecond}
+	h.e.Services = m
+
+	var agentCalls, agentAfterRestart atomic.Int32
+
+	h.e.Probe = func(_ context.Context, url string) error {
+		if !strings.Contains(url, ":19092/") {
+			return errors.New("connection refused")
+		}
+
+		if r := m.returned.Load(); r != 0 && time.Now().UnixNano() >= r {
+			agentAfterRestart.Add(1)
+		}
+
+		if agentCalls.Add(1) <= 2 {
+			return errors.New("connection refused")
+		}
+
+		return nil
+	}
+
+	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+	sinceLast := time.Since(time.Unix(0, m.returned.Load()))
+
+	var pe *ProblemsError
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, 1, pe.N, "only the server, whose probe never passes")
+	assert.Positive(t, agentAfterRestart.Load(), "the agent is probed after its slow restart")
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "healthy")
+	assert.Contains(t, resultRow(t, h.out.String(), repos.Server+" "), "connection refused")
+	assert.GreaterOrEqual(t, sinceLast, budget, "the server kept trying for a whole budget after the last restart")
+	assert.Less(t, sinceLast, budget+time.Second, "and not much longer")
+}

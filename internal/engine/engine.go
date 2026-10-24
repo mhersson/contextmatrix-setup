@@ -44,8 +44,9 @@ type Engine struct {
 	// Probe checks one health URL; nil uses httpProbe.
 	Probe func(ctx context.Context, url string) error
 	// HealthBudget bounds the health wait for all restarted services
-	// together (zero means 60s); HealthInterval spaces one service's probes
-	// (zero means 1s). SkipHealth restarts without probing.
+	// together, counted from the return of the last restart (zero means
+	// 60s); HealthInterval spaces one service's probes (zero means 1s).
+	// SkipHealth restarts without probing.
 	HealthBudget   time.Duration
 	HealthInterval time.Duration
 	SkipHealth     bool
