@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,7 +126,7 @@ func TestWorkflowSkillsCopyOnlyWhenChanged(t *testing.T) {
 	out, err = e.run("update", "--yes")
 	require.NoError(t, err, out)
 
-	assert.NotContains(t, out, fmt.Sprintf("%-22s updated", "workflow-skills"))
+	assert.Empty(t, skillsSteps(out), "unchanged skills are not copied")
 
 	e.commit("contextmatrix", "workflow-skills/create-plan.md", "v2\n")
 
@@ -135,6 +134,20 @@ func TestWorkflowSkillsCopyOnlyWhenChanged(t *testing.T) {
 	require.NoError(t, err, out)
 
 	assert.Equal(t, "v2\n", e.read(".contextmatrix/workflow-skills/create-plan.md"))
+	assert.Len(t, skillsSteps(out), 1, "changed skills are copied in one step")
+}
+
+// skillsSteps returns the plain step lines whose verb is skills.
+func skillsSteps(out string) []string {
+	var lines []string
+
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) > 1 && (f[0] == "✓" || f[0] == "✗") && f[1] == "skills" {
+			lines = append(lines, l)
+		}
+	}
+
+	return lines
 }
 
 func TestInstallWithoutDocker(t *testing.T) {

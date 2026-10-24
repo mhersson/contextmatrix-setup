@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -19,10 +20,12 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/ui"
 )
 
-type fakeGit struct{ head string }
+// fakeGit syncs to head and writes out as git's output.
+type fakeGit struct{ head, out string }
 
-func (g fakeGit) Sync(_ context.Context, dir, _ string, _ io.Writer) (string, error) {
+func (g fakeGit) Sync(_ context.Context, dir, _ string, w io.Writer) (string, error) {
 	_ = os.MkdirAll(dir, 0o755)
+	_, _ = io.WriteString(w, g.out)
 
 	return g.head, nil
 }
@@ -194,4 +197,42 @@ func TestSelfUpdateUpToDatePrintsNothing(t *testing.T) {
 
 	require.NoError(t, Run(context.Background(), o))
 	assert.Empty(t, screen.String())
+}
+
+func TestSelfUpdateStepCarriesTheSyncOutput(t *testing.T) {
+	o, _, _ := setup(t, "old0000000")
+	o.Git = fakeGit{head: "new0000000", out: "warning: from git\n"}
+
+	var screen bytes.Buffer
+
+	o.UI = plainConsole(&screen)
+
+	require.NoError(t, Run(context.Background(), o))
+
+	out := screen.String()
+	done := linesWith(out, " ✓ ")
+
+	require.Len(t, done, 1)
+	assert.Contains(t, out, "warning: from git")
+	assert.Less(t, strings.Index(out, "warning: from git"), strings.Index(out, done[0]))
+}
+
+// A live console shows no build output while the step runs, so a failure
+// boxes the tail and names the log.
+func TestSelfUpdateFailedBuildBoxesTheTailInATerminal(t *testing.T) {
+	o, f, _ := setup(t, "old0000000")
+	f.On("go", "install").Return("", "boom", 1)
+
+	var screen, log bytes.Buffer
+
+	c := ui.NewConsole(&screen, ui.NewTheme(ui.Mode{TTY: true, Width: 100}), &log, "/logs/update.log")
+	o.UI = c
+
+	err := Run(context.Background(), o)
+
+	c.Close()
+
+	require.NoError(t, err, "a failed rebuild continues with the current binary")
+	assert.Contains(t, ansi.Strip(screen.String()), "/logs/update.log")
+	assert.Contains(t, log.String(), "boom")
 }

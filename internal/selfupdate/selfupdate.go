@@ -125,8 +125,8 @@ type reporter struct {
 	sync bytes.Buffer
 }
 
-// syncOut holds back git's output on a console: a sync that changes nothing
-// prints nothing, and one that fails replays it into a failed step.
+// syncOut holds back git's output on a console until a step exists to carry
+// it, so a sync that changes nothing prints nothing.
 func (r *reporter) syncOut() io.Writer {
 	if r.c == nil {
 		return r.out
@@ -145,6 +145,7 @@ func (r *reporter) skipped(err error) {
 	r.step = r.c.Start("update", repos.Setup, "")
 	_, _ = r.step.Writer().Write(r.sync.Bytes())
 	r.fail("skipped: " + err.Error())
+	r.box(repos.Setup + " sync failed")
 }
 
 func (r *reporter) rebuilding(head string) io.Writer {
@@ -155,6 +156,7 @@ func (r *reporter) rebuilding(head string) io.Writer {
 	}
 
 	r.step = r.c.Start("update", repos.Setup, "go install")
+	_, _ = r.step.Writer().Write(r.sync.Bytes())
 
 	return r.step.Writer()
 }
@@ -166,12 +168,21 @@ func (r *reporter) failed(err error) {
 		return
 	}
 
-	r.fail("failed, continuing with the current binary: " + err.Error())
+	r.fail(err.Error() + ", kept the current binary")
+	r.box(repos.Setup + " build failed")
 }
 
 func (r *reporter) fail(detail string) {
 	if r.step != nil {
 		r.step.Fail(detail)
+	}
+}
+
+// box shows a failed step's output tail on a live console, as the update
+// steps do; plain output already streamed it.
+func (r *reporter) box(title string) {
+	if m := r.c.Theme().Mode(); m.TTY && !m.Plain {
+		r.c.Println(r.c.Theme().FailureBox(title, r.step.Tail(), r.c.LogPath()))
 	}
 }
 
