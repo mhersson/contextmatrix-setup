@@ -1,14 +1,25 @@
 # AGENTS.md - ContextMatrix Setup
 
-## Tech stack
-
-- **Go 1.27+**
-
 ## Coding conventions
 
 ### Go
 
 - `internal/` for all packages - nothing exported outside the module.
+- Wrap errors with `fmt.Errorf("operation: %w", err)`. Never swallow errors.
+- `context.Context` is the first parameter of any function that does I/O.
+- No mutable global state, no `init()` functions. Dependencies are injected
+  via struct fields (`engine.Engine`) and wired in `internal/cli`.
+- Engine output goes to the injected writer (`Engine.Out`) or `ui.Console`;
+  only `internal/cli` and the wizard bind them to the terminal.
+- Tests sit next to code (`update.go` -> `update_test.go`), table-driven
+  where cases share a shape, with testify, `t.Helper()` in helpers and
+  `t.TempDir()` for scratch dirs.
+- Tests must exercise behavior. A test that only fails when someone rewords a
+  string, renames a heading, or edits prose is not a test - do not write it,
+  and delete it when found. Asserting exact text is legitimate only where the
+  text is a wire contract a consumer parses; if no code reads it, no test
+  should pin it.
+- Format with `gofumpt -w .` (`make fmt`), not `gofmt`.
 
 ### Documentation
 
@@ -29,9 +40,11 @@
 Run before every commit:
 
 ```bash
-make test      # clean
-make lint      # clean
-make build     # builds
+make test              # clean
+make test-race         # clean
+make test-integration  # clean
+make lint              # clean
+make build             # builds
 ```
 
 - **Never commit to `main`.** Work on a feature branch; tasks of a plan or
@@ -40,3 +53,4 @@ make build     # builds
 - Conventional commits: `type(scope): concise summary`. Always include a scope.
 - Body uses bullet points for the what and why - no long paragraphs.
 - Never reference plan phases, task numbers, or private card IDs in messages.
+- No session links in commits or PRs.
