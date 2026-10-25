@@ -128,10 +128,17 @@ restart, or an unhealthy service. A service held back because `server.yaml` has
 no github block or docker is missing shows as not started, which is not a
 problem.
 
-When the install manages its services with systemd or launchd and the run
-cannot reach that user manager, as from an SSH session or a cron job without
-one, `update` stops before it fetches anything and exits 1 with an error that
-names the cause. Rerun it where the user manager is reachable.
+When the install manages its services with systemd and the run cannot reach
+the systemd user manager, as from an SSH session or a cron job without one,
+`update` stops before it fetches anything and exits 1 with an error that names
+the cause. Rerun it where the user manager is reachable. With launchd the same
+happens only when `launchctl` is missing.
+
+An install recorded as unmanaged (`service_manager: none` in
+`~/.contextmatrix/setup/state.yaml`) stays unmanaged: only a first `install`
+records the manager, and `install` on an installed system runs `update`. To
+manage its services again, set `service_manager: systemd` (or `launchd`) in
+that file and run `update`.
 
 With `NO_COLOR` set, `TERM=dumb`, or output that is not a terminal (a pipe, a
 log), `update` prints plain text with the same layout, no colours and no escape
@@ -179,9 +186,12 @@ invalid config, no docker, architect port taken) does not start at boot or
 login either; the `update` that starts it enables it. A service that cannot
 run yet, a server without its github block or a backend with no docker and no
 worker image, has its unit disabled by every `install` and `update`, even one
-enabled before; on macOS its label is also unloaded. On macOS a new plist is
-disabled with `launchctl disable` until it is started, since launchd loads
-every plist in `~/Library/LaunchAgents` at login.
+enabled before; on macOS its label is also unloaded. Setup reads the github
+block from `server.yaml` only, so a block given through the environment, such
+as in a `systemctl --user edit` drop-in, counts as missing: that server is not
+started and its unit is disabled. On macOS a new plist is disabled with
+`launchctl disable` until it is started, since launchd loads every plist in
+`~/Library/LaunchAgents` at login.
 
 ## Worker images
 
