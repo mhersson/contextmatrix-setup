@@ -140,10 +140,6 @@ func (a Answers) Validate() error {
 	return nil
 }
 
-func (a Answers) GitHubConfigured() bool {
-	return a.GitHubMode == "pat" || a.GitHubMode == "app"
-}
-
 // githubComplete reports whether the chosen mode has every credential it
 // needs.
 func (a Answers) githubComplete() bool {

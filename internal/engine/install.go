@@ -16,7 +16,6 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
-	"github.com/mhersson/contextmatrix-setup/internal/services"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
@@ -444,7 +443,7 @@ func (e *Engine) validateAll(ctx context.Context, results map[string]configResul
 			continue
 		}
 
-		errs[repo] = configsync.Validate(ctx, e.R, e.Host.Binary(binaryFor(repo)), results[repo].Path)
+		errs[repo] = configsync.Validate(ctx, e.R, e.Host.Binary(repo), results[repo].Path)
 	}
 
 	return errs
@@ -534,7 +533,7 @@ func (e *Engine) followLink(ctx context.Context) *linkWatch {
 		defer close(w.done)
 
 		w.path, w.err = bootstrap.Wait(ctx, func(ctx context.Context, out io.Writer) error {
-			return e.Services.Follow(ctx, services.Server, out)
+			return e.Services.Follow(ctx, repos.Server, out)
 		}, bootstrapWait)
 	}()
 
@@ -588,10 +587,10 @@ func (e *Engine) announce(ctx context.Context, a Answers, serverStarted bool, wa
 
 func (e *Engine) linkCommand() string {
 	if e.Host.OS == "darwin" {
-		log := layout.Tilde(e.L, filepath.Join(e.L.MacLogsDir(), services.Server+".log"))
+		log := layout.Tilde(e.L, filepath.Join(e.L.MacLogsDir(), repos.Server+".log"))
 
 		return "grep 'bootstrap link' " + log
 	}
 
-	return "journalctl --user -u " + services.Server + " -n 50 | grep 'bootstrap link'"
+	return "journalctl --user -u " + repos.Server + " -n 50 | grep 'bootstrap link'"
 }

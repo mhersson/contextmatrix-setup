@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 )
 
@@ -24,13 +25,13 @@ func TestSystemdInstallWritesAndReloadsWithoutEnabling(t *testing.T) {
 
 	m := New("systemd", f, l, 1000)
 	assert.Equal(t, "systemd", m.Kind())
-	assert.Equal(t, filepath.Join(home, ".config", "systemd", "user", "contextmatrix-agent.service"), m.UnitPath(Agent))
+	assert.Equal(t, filepath.Join(home, ".config", "systemd", "user", "contextmatrix-agent.service"), m.UnitPath(repos.Agent))
 
 	changed, err := m.Install(context.Background(), agentService())
 	require.NoError(t, err)
 	assert.True(t, changed)
 
-	data, err := os.ReadFile(m.UnitPath(Agent))
+	data, err := os.ReadFile(m.UnitPath(repos.Agent))
 	require.NoError(t, err)
 	assert.Equal(t, wantSystemd, string(data))
 
@@ -54,30 +55,30 @@ func TestSystemdLifecycle(t *testing.T) {
 
 	n := len(f.Calls())
 
-	require.NoError(t, m.Start(context.Background(), Server))
+	require.NoError(t, m.Start(context.Background(), repos.Server))
 	assertBefore(t, argsOf(f)[n:], enable, []string{"--user", "start", "contextmatrix"}, "start enables the unit first")
 
 	n = len(f.Calls())
 
-	require.NoError(t, m.Restart(context.Background(), Server))
+	require.NoError(t, m.Restart(context.Background(), repos.Server))
 	assertBefore(t, argsOf(f)[n:], enable, []string{"--user", "restart", "contextmatrix"}, "restart enables the unit first")
 
-	require.NoError(t, m.Stop(context.Background(), Server))
+	require.NoError(t, m.Stop(context.Background(), repos.Server))
 
 	n = len(f.Calls())
 
-	require.NoError(t, m.Disable(context.Background(), Server))
+	require.NoError(t, m.Disable(context.Background(), repos.Server))
 	assert.Equal(t, [][]string{{"--user", "disable", "contextmatrix"}}, argsOf(f)[n:])
 
-	active, err := m.Active(context.Background(), Server)
+	active, err := m.Active(context.Background(), repos.Server)
 	require.NoError(t, err)
 	assert.True(t, active)
 
-	logs, err := m.Logs(context.Background(), Server, 20)
+	logs, err := m.Logs(context.Background(), repos.Server, 20)
 	require.NoError(t, err)
 	assert.Equal(t, "line1\nline2\n", logs)
 
-	require.NoError(t, m.Remove(context.Background(), Server), "missing unit file is fine")
+	require.NoError(t, m.Remove(context.Background(), repos.Server), "missing unit file is fine")
 
 	args := [][]string{}
 	for _, c := range f.Calls() {
@@ -98,7 +99,7 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	f.On("tail").Return("l1\n", "", 0)
 
 	m := New("launchd", f, l, 501)
-	assert.Equal(t, filepath.Join(home, "Library", "LaunchAgents", "com.github.mhersson.contextmatrix-agent.plist"), m.UnitPath(Agent))
+	assert.Equal(t, filepath.Join(home, "Library", "LaunchAgents", "com.github.mhersson.contextmatrix-agent.plist"), m.UnitPath(repos.Agent))
 
 	changed, err := m.Install(context.Background(), agentService())
 	require.NoError(t, err)
@@ -107,23 +108,23 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	target := "gui/501/com.github.mhersson.contextmatrix-agent"
 	assert.NotContains(t, argsOf(f), []string{"disable", target}, "a loaded agent is running and stays enabled")
 
-	active, err := m.Active(context.Background(), Agent)
+	active, err := m.Active(context.Background(), repos.Agent)
 	require.NoError(t, err)
 	assert.True(t, active)
 
 	n := len(f.Calls())
 
-	require.NoError(t, m.Restart(context.Background(), Agent))
+	require.NoError(t, m.Restart(context.Background(), repos.Agent))
 	assertBefore(t, argsOf(f)[n:], []string{"enable", target}, []string{"kickstart", "-k", target}, "restart enables the agent first")
 
-	require.NoError(t, m.Stop(context.Background(), Agent))
+	require.NoError(t, m.Stop(context.Background(), repos.Agent))
 
 	n = len(f.Calls())
 
-	require.NoError(t, m.Disable(context.Background(), Agent))
+	require.NoError(t, m.Disable(context.Background(), repos.Agent))
 	assert.Equal(t, [][]string{{"disable", target}}, argsOf(f)[n:])
 
-	logs, err := m.Logs(context.Background(), Agent, 5)
+	logs, err := m.Logs(context.Background(), repos.Agent, 5)
 	require.NoError(t, err)
 	assert.Equal(t, "l1\n", logs)
 
@@ -135,7 +136,7 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	// print reports the agent as loaded, so a changed plist is booted out
 	// and bootstrapped again so the running agent picks it up.
 	bootout := []string{"bootout", "gui/501/com.github.mhersson.contextmatrix-agent"}
-	bootstrap := []string{"bootstrap", "gui/501", m.UnitPath(Agent)}
+	bootstrap := []string{"bootstrap", "gui/501", m.UnitPath(repos.Agent)}
 
 	assert.Contains(t, args, bootout)
 	assert.Contains(t, args, bootstrap)
@@ -158,7 +159,7 @@ func TestLaunchdInstallNeverBootstraps(t *testing.T) {
 	assert.True(t, changed)
 
 	target := "gui/501/com.github.mhersson.contextmatrix-agent"
-	bootstrap := []string{"bootstrap", "gui/501", m.UnitPath(Agent)}
+	bootstrap := []string{"bootstrap", "gui/501", m.UnitPath(repos.Agent)}
 	assert.NotContains(t, argsOf(f), bootstrap, "writing a plist must not start the agent")
 	assert.NotContains(t, argsOf(f), []string{"bootout", target})
 	assert.Contains(t, argsOf(f), []string{"disable", target}, "a new plist does not load at the next login")
@@ -180,7 +181,7 @@ func TestLaunchdInstallNeverBootstraps(t *testing.T) {
 
 	n := len(f.Calls())
 
-	require.NoError(t, m.Start(context.Background(), Agent))
+	require.NoError(t, m.Start(context.Background(), repos.Agent))
 	assertBefore(t, argsOf(f)[n:], []string{"enable", target}, bootstrap, "start enables the agent before loading it")
 }
 
@@ -196,17 +197,17 @@ func argsOf(f *run.Fake) [][]string {
 func TestNoneManagerIsInert(t *testing.T) {
 	m := New("none", run.NewFake(), layout.New(t.TempDir(), nil), 1000)
 	assert.Equal(t, "none", m.Kind())
-	assert.Empty(t, m.UnitPath(Server))
+	assert.Empty(t, m.UnitPath(repos.Server))
 
 	changed, err := m.Install(context.Background(), agentService())
 	require.NoError(t, err)
 	assert.False(t, changed)
 
-	active, err := m.Active(context.Background(), Server)
+	active, err := m.Active(context.Background(), repos.Server)
 	require.NoError(t, err)
 	assert.False(t, active)
-	require.NoError(t, m.Start(context.Background(), Server))
-	require.NoError(t, m.Disable(context.Background(), Server))
+	require.NoError(t, m.Start(context.Background(), repos.Server))
+	require.NoError(t, m.Disable(context.Background(), repos.Server))
 }
 
 // assertBefore asserts that both calls ran, first before then.

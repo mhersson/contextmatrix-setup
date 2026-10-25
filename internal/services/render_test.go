@@ -4,11 +4,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 )
 
 func agentService() Service {
 	return Service{
-		Name:           Agent,
+		Name:           repos.Agent,
 		Description:    "ContextMatrix Agent (task backend)",
 		Binary:         "/home/u/go/bin/contextmatrix-agent",
 		Args:           []string{"serve", "--config", "/home/u/.config/contextmatrix/agent.yaml"},
@@ -150,5 +152,5 @@ func TestRenderEscapesPlistText(t *testing.T) {
 }
 
 func TestLabel(t *testing.T) {
-	assert.Equal(t, "com.github.mhersson.contextmatrix", Label(Server))
+	assert.Equal(t, "com.github.mhersson.contextmatrix", Label(repos.Server))
 }

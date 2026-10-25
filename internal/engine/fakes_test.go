@@ -236,7 +236,7 @@ func (g *followGate) Follow(ctx context.Context, name string, w io.Writer) error
 }
 
 func (g *followGate) Start(ctx context.Context, name string) error {
-	if name == services.Server {
+	if name == repos.Server {
 		select {
 		case <-g.following:
 			g.attachedBeforeStart = true

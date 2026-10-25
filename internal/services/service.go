@@ -10,15 +10,6 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 )
 
-const (
-	Server    = "contextmatrix"
-	Agent     = "contextmatrix-agent"
-	Chat      = "contextmatrix-chat"
-	Architect = "contextmatrix-architect"
-)
-
-var All = []string{Server, Agent, Chat, Architect}
-
 type Service struct {
 	Name           string
 	Description    string

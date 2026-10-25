@@ -20,7 +20,6 @@ type RepoStatus struct {
 type ServiceStatus struct {
 	Name   string
 	Active bool
-	Unit   string
 }
 
 type Status struct {
@@ -56,7 +55,7 @@ func (e *Engine) Status(ctx context.Context) (Status, error) {
 		s.Repos = append(s.Repos, RepoStatus{Name: repo, Installed: st.Repos[repo].Commit, Cached: cached})
 
 		active, _ := e.Services.Active(ctx, repo)
-		s.Services = append(s.Services, ServiceStatus{Name: repo, Active: active, Unit: e.Services.UnitPath(repo)})
+		s.Services = append(s.Services, ServiceStatus{Name: repo, Active: active})
 
 		if tree, _, err := configsync.LoadFile(e.L.ConfigFor(repo)); err == nil {
 			if v, ok := configsync.Get(tree, "port"); ok {

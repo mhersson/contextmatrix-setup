@@ -61,7 +61,7 @@ func (e *Engine) buildBinary(ctx context.Context, repo string, out io.Writer, sa
 }
 
 func (e *Engine) schema(ctx context.Context, repo string) (configsync.Tree, error) {
-	bin := e.Host.Binary(binaryFor(repo))
+	bin := e.Host.Binary(repo)
 
 	res, err := e.R.Run(ctx, run.Cmd{Name: bin, Args: []string{"config", "defaults"}})
 	if err != nil {
@@ -214,7 +214,7 @@ func mergedTrees(results map[string]configResult) Trees {
 }
 
 func (e *Engine) serviceFor(repo string, t Trees) services.Service {
-	bin := e.Host.Binary(binaryFor(repo))
+	bin := e.Host.Binary(repo)
 	env := map[string]string{"HOME": e.L.Home, "PATH": e.Host.ServicePath()}
 
 	// The docker host is a static machine fact, not a per-call decision, so
