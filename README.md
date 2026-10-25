@@ -124,7 +124,9 @@ image it runs.
 
 `update` exits 1 when a row of the result table has a problem: an image that
 did not build, an invalid config for a service that needed a restart, a failed
-restart, or an unhealthy service.
+restart, or an unhealthy service. A service held back because `server.yaml` has
+no github block or docker is missing shows as not started, which is not a
+problem.
 
 With `NO_COLOR` set, `TERM=dumb`, or output that is not a terminal (a pipe, a
 log), `update` prints plain text with the same layout, no colours and no escape
@@ -199,7 +201,9 @@ only for some keys.
 The schema comes from each app's own `config defaults` command, so a fresh
 upstream key appears at the next update and a removed one is dropped and listed
 in the output. A value that fails the app's validation is reported with the key
-path and that service is not restarted; fix it and rerun.
+path and that service is not restarted; fix it and rerun. A service held back
+for a missing github block or missing docker is validated once that is fixed,
+since its file lacks those values until then.
 
 ## Development
 

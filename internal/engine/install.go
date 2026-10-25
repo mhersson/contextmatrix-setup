@@ -150,7 +150,11 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 	st.WorkflowSkills = state.WorkflowSkills{Commit: heads[repos.Server], Files: files}
 
-	invalid := e.validateAll(ctx, results)
+	// Read GitHub readiness from the merged file, not the answers: after a
+	// migration the block is carried over while the answers say "skip".
+	github := githubConfigured(results[repos.Server].Tree)
+
+	invalid := e.validateAll(ctx, results, github)
 	valid := map[string]bool{}
 
 	for _, repo := range repos.Apps {
@@ -164,10 +168,6 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
 		e.logf("warning: %s", w)
 	}
-
-	// Read GitHub readiness from the merged file, not the answers: after a
-	// migration the block is carried over while the answers say "skip".
-	github := githubConfigured(results[repos.Server].Tree)
 
 	// The server logs the admin link once, at startup, so the log must be
 	// followed before the server is started or the line is missed.
@@ -428,12 +428,18 @@ func samePath(a, b string) (bool, error) {
 	return ra == rb, nil
 }
 
-// validateAll runs each app's own validation, nil meaning valid. A failure
-// never touches the file; the user fixes the value and reruns.
-func (e *Engine) validateAll(ctx context.Context, results map[string]configResult) map[string]error {
+// validateAll runs each app's own validation, nil meaning valid, except for
+// a repo with a skip reason, which the first run after the reason is gone
+// validates. A failure never touches the file; the user fixes the value and
+// reruns.
+func (e *Engine) validateAll(ctx context.Context, results map[string]configResult, github bool) map[string]error {
 	errs := map[string]error{}
 
 	for _, repo := range repos.Apps {
+		if e.skipReason(repo, github) != "" {
+			continue
+		}
+
 		errs[repo] = configsync.Validate(ctx, e.R, e.Host.Binary(binaryFor(repo)), results[repo].Path)
 	}
 
@@ -462,21 +468,18 @@ func (e *Engine) enableLinger(ctx context.Context) {
 	}
 }
 
-// startEligible starts what can run and reports what it started: the
-// server only with GitHub configured and a valid file, the worker backends
-// only with docker and a valid file, the architect with a valid file. A
-// repo in hold is not started, for the reason given.
+// startEligible starts what can run and reports what it started: a repo
+// with no skip reason and a valid file. A repo in hold is not started, for
+// the reason given.
 func (e *Engine) startEligible(ctx context.Context, github bool, valid map[string]bool, hold map[string]string) map[string]bool {
 	started := map[string]bool{}
 
 	for _, repo := range repos.Apps {
-		switch {
+		switch skip := e.skipReason(repo, github); {
+		case skip != "":
+			e.logf("%-22s not started: %s", repo, skip)
 		case !valid[repo]:
 			e.logf("%-22s not started: config invalid", repo)
-		case repo == repos.Server && !github:
-			e.logf("%-22s not started: fill in the github block of server.yaml, then run update", repo)
-		case needsDocker(repo) && !e.Host.Docker:
-			e.logf("%-22s not started: docker not available", repo)
 		case hold[repo] != "":
 			e.logf("%-22s not started: %s", repo, hold[repo])
 		default:

@@ -102,3 +102,17 @@ func binaryFor(repo string) string {
 func needsDocker(repo string) bool {
 	return repo == repos.Agent || repo == repos.Chat
 }
+
+// skipReason names the documented reason a repo is not started on this
+// host, "" when there is none. Its file lacks the matching values until
+// then, which its validator rejects, so such a repo is not validated either.
+func (e *Engine) skipReason(repo string, github bool) string {
+	switch {
+	case repo == repos.Server && !github:
+		return "github block missing in server.yaml; fill it in, then run update"
+	case needsDocker(repo) && !e.Host.Docker:
+		return "docker not available"
+	default:
+		return ""
+	}
+}

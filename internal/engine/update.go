@@ -257,7 +257,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		}
 	}
 
-	invalid := e.validateAll(ctx, results)
+	github := githubConfigured(results[repos.Server].Tree)
+	invalid := e.validateAll(ctx, results, github)
 
 	for _, repo := range repos.Apps {
 		if err := invalid[repo]; err != nil {
@@ -324,8 +325,6 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		}
 	}
 
-	github := githubConfigured(results[repos.Server].Tree)
-
 	var (
 		rows    []serviceResult
 		restart = map[string]bool{}
@@ -345,7 +344,7 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 		row := serviceResult{Repo: repo, Running: repos.Short(st.Repos[repo].Commit), Image: e.workerImage(repo, tag)}
 
-		switch {
+		switch skip := e.skipReason(repo, github); {
 		case buildFailed[repo] && oldTags[repo] == "":
 			// Without an image the backend never ran, so nothing is kept.
 			row.Result, row.Problem, row.Running = "✗ not started", true, ""
@@ -353,13 +352,11 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		case buildFailed[repo]:
 			row.Result, row.Problem, row.Kept = "● kept", true, true
 			row.Note = fmt.Sprintf("keeps running %s: its worker image did not build, so it was not restarted. The next update retries it.", row.Running)
+		case skip != "":
+			row.Result, row.Note = "● not started", skip
 		case invalid[repo] != nil:
 			row.Result, row.Problem = "✗ not restarted", true
 			row.Note = "config invalid: " + invalid[repo].Error()
-		case repo == repos.Server && !github:
-			row.Result, row.Note = "● not started", "github block missing in server.yaml"
-		case needsDocker(repo) && !e.Host.Docker:
-			row.Result, row.Note = "● not started", "docker not available"
 		case hold[repo] != "":
 			row.Result, row.Note = "● not started", hold[repo]
 		case unmanaged:

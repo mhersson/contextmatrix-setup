@@ -91,6 +91,28 @@ func restarts(h *harness) []string {
 	return out
 }
 
+// validations counts the runs of repo's own config validation.
+func validations(h *harness, repo string) int {
+	n := 0
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == h.e.Host.Binary(repo) && len(c.Args) > 1 && c.Args[0] == "config" && c.Args[1] == "validate" {
+			n++
+		}
+	}
+
+	return n
+}
+
+// rejectIncomplete makes the validators reject what a host without GitHub
+// and docker leaves behind, as upstream does: the server an empty github
+// block, the worker backends an empty base_image.
+func rejectIncomplete(h *harness) {
+	h.runner.On(h.e.Host.Binary(repos.Server), "config", "validate").Return("", `error: github.auth_mode is required: must be "app" or "pat" (got "")`, 1)
+	h.runner.On(h.e.Host.Binary(repos.Agent), "config", "validate").Return("", "error: base_image is required", 1)
+	h.runner.On(h.e.Host.Binary(repos.Chat), "config", "validate").Return("", "error: base_image is required", 1)
+}
+
 func TestUpdateNothingMovedIsQuiet(t *testing.T) {
 	h := installed(t, true)
 
@@ -302,6 +324,84 @@ func TestUpdateDockerAppeared(t *testing.T) {
 
 	st, _, _ := state.Load(h.e.L.StateFile())
 	assert.True(t, st.Docker)
+}
+
+// A server waiting for its github block and backends waiting for docker are
+// held back for those reasons, not reported invalid for the values their
+// validators reject until then.
+func TestUpdateSkipReasonsWinOverValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		architectInvalid bool
+	}{
+		{name: "only skip rows"},
+		{name: "an eligible invalid config is still a problem", architectInvalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, false)
+			rejectIncomplete(h)
+			require.NoError(t, h.e.Install(context.Background(), DefaultAnswers()))
+			h.out.b = nil
+
+			if tc.architectInvalid {
+				h.runner.On(h.e.Host.Binary(repos.Architect), "config", "validate").Return("", "error: contextmatrix_url is required", 1)
+			}
+
+			for repo, head := range map[string]string{
+				repos.Server: "a9999999999", repos.Agent: "b9999999999",
+				repos.Chat: "c9999999999", repos.Architect: "d9999999999",
+			} {
+				h.git.heads[repo] = head
+			}
+
+			err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+			out := h.out.String()
+
+			for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
+				row := resultRow(t, out, repo)
+				assert.Contains(t, row, "not started", repo)
+				assert.NotContains(t, row, "✗", repo)
+				assert.Zero(t, validations(h, repo), "%s is held back, so it is not validated", repo)
+			}
+
+			assert.NotContains(t, out, "auth_mode is required")
+			assert.NotContains(t, out, "base_image is required")
+
+			if !tc.architectInvalid {
+				require.NoError(t, err, "skip rows are not problems")
+				assert.Equal(t, []string{repos.Architect}, restarts(h))
+
+				return
+			}
+
+			var pe *ProblemsError
+			require.ErrorAs(t, err, &pe)
+			assert.Equal(t, 1, pe.N, "only the architect")
+			assert.Contains(t, resultRow(t, out, repos.Architect), "✗")
+			assert.Contains(t, out, "contextmatrix_url is required")
+			assert.Empty(t, restarts(h))
+		})
+	}
+}
+
+// Once docker is there, the backends held back for it are validated again.
+func TestUpdateValidatesABackendOnceDockerIsThere(t *testing.T) {
+	h := newHarness(t, false)
+	rejectIncomplete(h)
+	require.NoError(t, h.e.Install(context.Background(), DefaultAnswers()))
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+	require.Zero(t, validations(h, repos.Agent))
+
+	h.e.Host.Docker = true
+	h.runner.On(h.e.Host.Binary(repos.Agent), "config", "validate").Return("ok\n", "", 0)
+	h.runner.On(h.e.Host.Binary(repos.Chat), "config", "validate").Return("ok\n", "", 0)
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, 1, validations(h, repos.Agent))
+	assert.Equal(t, 1, validations(h, repos.Chat))
+	assert.Contains(t, restarts(h), repos.Agent)
+	assert.Contains(t, restarts(h), repos.Chat)
 }
 
 func TestUpdateRequiresInstall(t *testing.T) {

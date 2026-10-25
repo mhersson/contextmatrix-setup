@@ -135,9 +135,12 @@ func TestInstallFreshWithDocker(t *testing.T) {
 	assert.Contains(t, h.out.String(), "server.yaml")
 }
 
+// The server waits for its github block and the worker backends for
+// docker; neither is reported invalid for the values their validators
+// reject until then.
 func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 	h := newHarness(t, false)
-	h.runner.On(filepath.Join(h.e.Host.GoBin, "contextmatrix"), "config", "validate").Return("", "error: github.auth_mode is required", 1)
+	rejectIncomplete(h)
 
 	require.NoError(t, h.e.Install(context.Background(), DefaultAnswers()))
 
@@ -149,15 +152,35 @@ func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 	assert.Empty(t, h.images.built)
 
 	assert.Equal(t, []string{"contextmatrix-architect"}, starts(h),
-		"the server is invalid and the worker backends need docker; the architect needs neither")
+		"the server needs its github block and the worker backends need docker; the architect needs neither")
+
+	for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
+		assert.Zero(t, validations(h, repo), "%s is held back, so it is not validated", repo)
+	}
 
 	out := h.out.String()
-	assert.Contains(t, out, "github.auth_mode is required")
+	assert.NotContains(t, out, "auth_mode is required")
+	assert.NotContains(t, out, "base_image is required")
 	assert.Contains(t, out, "docker")
 
 	st, _, err := state.Load(h.e.L.StateFile())
 	require.NoError(t, err)
 	assert.False(t, st.Docker)
+}
+
+func TestInstallDoesNotStartAnEligibleInvalidConfig(t *testing.T) {
+	h := newHarness(t, true)
+	h.runner.On(h.e.Host.Binary(repos.Architect), "config", "validate").Return("", "error: contextmatrix_url is required", 1)
+
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	assert.Equal(t, []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"}, starts(h))
+	assert.Contains(t, h.out.String(), "contextmatrix_url is required")
 }
 
 func TestInstallOpensBootstrapLinkInMultiMode(t *testing.T) {
