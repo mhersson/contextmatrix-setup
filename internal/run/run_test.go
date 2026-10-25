@@ -30,7 +30,6 @@ func TestExecStreamReturnsExitError(t *testing.T) {
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, 2, exitErr.Code)
 	assert.Contains(t, out.String(), "building")
-	assert.Contains(t, exitErr.Tail, "building")
 }
 
 func TestExecLookPath(t *testing.T) {

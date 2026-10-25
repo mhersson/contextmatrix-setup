@@ -8,17 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 )
 
 type Cmd struct {
-	Name  string
-	Args  []string
-	Dir   string
-	Env   []string
-	Stdin io.Reader
+	Name string
+	Args []string
+	Dir  string
 }
 
 type Result struct {
@@ -33,12 +30,11 @@ type Runner interface {
 	LookPath(name string) (string, bool)
 }
 
-// ExitError carries the last lines of combined output so a failed build can
-// be reported without re-running it.
+// ExitError reports a streamed command that exited non-zero; its output
+// already went to the stream.
 type ExitError struct {
 	Cmd  Cmd
 	Code int
-	Tail string
 }
 
 func (e *ExitError) Error() string {
@@ -73,15 +69,13 @@ func (Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 
 func (Exec) Stream(ctx context.Context, c Cmd, out io.Writer) error {
 	cmd := build(ctx, c)
-	tail := &tailBuffer{limit: 40}
-	w := io.MultiWriter(out, tail)
-	cmd.Stdout = w
-	cmd.Stderr = w
+	cmd.Stdout = out
+	cmd.Stderr = out
 
 	err := cmd.Run()
 
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-		return &ExitError{Cmd: c, Code: exitErr.ExitCode(), Tail: tail.String()}
+		return &ExitError{Cmd: c, Code: exitErr.ExitCode()}
 	}
 
 	if err != nil {
@@ -102,47 +96,6 @@ func build(ctx context.Context, c Cmd) *exec.Cmd {
 	// process execution behind an interface for every other package.
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...) //nolint:gosec
 	cmd.Dir = c.Dir
-	cmd.Stdin = c.Stdin
-
-	if len(c.Env) > 0 {
-		cmd.Env = append(os.Environ(), c.Env...)
-	}
 
 	return cmd
-}
-
-// tailBuffer keeps the last limit lines written to it.
-type tailBuffer struct {
-	limit int
-	lines []string
-	part  string
-}
-
-func (t *tailBuffer) Write(p []byte) (int, error) {
-	t.part += string(p)
-
-	for {
-		i := strings.IndexByte(t.part, '\n')
-		if i < 0 {
-			break
-		}
-
-		t.lines = append(t.lines, t.part[:i])
-		t.part = t.part[i+1:]
-
-		if len(t.lines) > t.limit {
-			t.lines = t.lines[1:]
-		}
-	}
-
-	return len(p), nil
-}
-
-func (t *tailBuffer) String() string {
-	lines := t.lines
-	if t.part != "" {
-		lines = append(append([]string{}, lines...), t.part)
-	}
-
-	return strings.Join(lines, "\n")
 }
