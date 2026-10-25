@@ -169,7 +169,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 
 	if asked[stepInference] {
 		fields := []huh.Field{
-			huh.NewNote().Title("Inference").Description("Runs and chats need an OpenRouter API key; it is forwarded to every worker. Leave empty to add it to server.yaml later."),
+			huh.NewNote().Title("Inference").Description("Runs and chats need an OpenRouter API key. The agent and chat services keep it; workers get only a per-run proxy token. Leave empty to add it to server.yaml later."),
 		}
 
 		if !known.OpenRouterKey {
