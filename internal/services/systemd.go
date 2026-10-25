@@ -99,12 +99,12 @@ func writeUnit(path string, data []byte) (bool, error) {
 		return false, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // G301: the systemd user unit dir convention
 		return false, err
 	}
 
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // G306: units carry only HOME, PATH and DOCKER_HOST, no secret
 		return false, err
 	}
 

@@ -58,7 +58,7 @@ func (m *launchd) loaded(ctx context.Context, name string) bool {
 // must not dictate what gets created on disk.
 func (m *launchd) Install(ctx context.Context, s Service) (bool, error) {
 	if s.LogFile != "" {
-		if err := os.MkdirAll(m.l.MacLogsDir(), 0o755); err != nil {
+		if err := os.MkdirAll(m.l.MacLogsDir(), 0o755); err != nil { //nolint:gosec // G301: the ~/Library/Logs convention; setup writes no secret there
 			return false, err
 		}
 	}

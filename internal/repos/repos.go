@@ -36,7 +36,7 @@ type Git struct {
 
 func (g Git) Sync(ctx context.Context, dir, url string, out io.Writer) (string, error) {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil { //nolint:gosec // G301: the source cache holds public clones, no secret
 			return "", err
 		}
 
