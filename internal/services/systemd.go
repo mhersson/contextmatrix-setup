@@ -109,7 +109,7 @@ func writeUnit(path string, data []byte) (bool, error) {
 		return false, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // G301: the systemd user unit dir convention
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // G301: the systemd user unit and LaunchAgents dir conventions
 		return false, err
 	}
 

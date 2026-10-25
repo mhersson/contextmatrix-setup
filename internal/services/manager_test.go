@@ -119,11 +119,6 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 
 	require.NoError(t, m.Stop(context.Background(), repos.Agent))
 
-	n = len(f.Calls())
-
-	require.NoError(t, m.Disable(context.Background(), repos.Agent))
-	assert.Equal(t, [][]string{{"disable", target}}, argsOf(f)[n:])
-
 	logs, err := m.Logs(context.Background(), repos.Agent, 5)
 	require.NoError(t, err)
 	assert.Equal(t, "l1\n", logs)
@@ -183,6 +178,46 @@ func TestLaunchdInstallNeverBootstraps(t *testing.T) {
 
 	require.NoError(t, m.Start(context.Background(), repos.Agent))
 	assertBefore(t, argsOf(f)[n:], []string{"enable", target}, bootstrap, "start enables the agent before loading it")
+}
+
+// launchd refuses to bootstrap a disabled label, so Disable unloads a loaded
+// one first: Install's reload of a changed plist could not succeed on it.
+func TestLaunchdDisableUnloadsALoadedLabel(t *testing.T) {
+	target := "gui/501/com.github.mhersson.contextmatrix"
+
+	for _, tc := range []struct {
+		name   string
+		loaded bool
+		want   [][]string
+	}{
+		{name: "loaded", loaded: true, want: [][]string{{"bootout", target}, {"disable", target}}},
+		{name: "not loaded", want: [][]string{{"disable", target}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := run.NewFake()
+
+			if tc.loaded {
+				f.On("launchctl", "print").Return("state = running\n", "", 0)
+			} else {
+				f.On("launchctl", "print").Return("", "Could not find service", 113)
+			}
+
+			f.On("launchctl").Return("", "", 0)
+
+			m := New("launchd", f, layout.New(t.TempDir(), nil), 501)
+			require.NoError(t, m.Disable(context.Background(), repos.Server))
+
+			var changes [][]string
+
+			for _, a := range argsOf(f) {
+				if a[0] != "print" {
+					changes = append(changes, a)
+				}
+			}
+
+			assert.Equal(t, tc.want, changes)
+		})
+	}
 }
 
 func argsOf(f *run.Fake) [][]string {

@@ -119,7 +119,14 @@ func (m *launchd) Restart(ctx context.Context, name string) error {
 	return m.ctl(ctx, "kickstart", "-k", m.target(name))
 }
 
+// Disable boots out a loaded label first: launchd refuses to bootstrap a
+// disabled one, so Install could not reload it on a changed plist. Only a
+// service that cannot run is disabled, so nothing is lost.
 func (m *launchd) Disable(ctx context.Context, name string) error {
+	if err := m.Stop(ctx, name); err != nil {
+		return err
+	}
+
 	return m.ctl(ctx, "disable", m.target(name))
 }
 
