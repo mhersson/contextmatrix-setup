@@ -43,6 +43,10 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 		return errors.New("nothing installed yet: run contextmatrix-setup install first")
 	}
 
+	if err := e.recordedManagerReachable(st.ServiceManager); err != nil {
+		return err
+	}
+
 	e.useRecordedManager(st.ServiceManager)
 	unmanaged := e.Services.Kind() == "none"
 
@@ -395,7 +399,6 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 	}
 
 	st.Docker = e.Host.Docker
-	st.ServiceManager = e.Services.Kind()
 
 	for _, repo := range repos.Apps {
 		// A repo whose image did not build stays on its recorded commit, so

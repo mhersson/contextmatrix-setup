@@ -12,6 +12,7 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 	"github.com/mhersson/contextmatrix-setup/internal/services"
+	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
 type Git interface {
@@ -87,6 +88,33 @@ func (e *Engine) useRecordedManager(kind string) {
 	if kind == "none" {
 		e.Services = services.New("none", e.R, e.L, 0)
 	}
+}
+
+// CheckServiceManager stops a run before it fetches anything when the
+// install recorded a service manager this run cannot reach.
+func (e *Engine) CheckServiceManager() error {
+	st, _, err := state.Load(e.L.StateFile())
+	if err != nil {
+		return err
+	}
+
+	return e.recordedManagerReachable(st.ServiceManager)
+}
+
+// recordedManagerReachable fails when the install recorded systemd or
+// launchd and this run detects none, as from an SSH session or a cron job
+// without the user manager: going on would restart nothing.
+func (e *Engine) recordedManagerReachable(recorded string) error {
+	if (recorded != "systemd" && recorded != "launchd") || e.Services.Kind() != "none" {
+		return nil
+	}
+
+	reason := e.Host.ServiceManagerReason
+	if reason == "" {
+		reason = "none detected"
+	}
+
+	return fmt.Errorf("recorded service manager is %s but the user manager is not reachable (%s); rerun when it is", recorded, reason)
 }
 
 func (e *Engine) logf(format string, args ...any) {

@@ -453,6 +453,89 @@ func TestUpdateEnablesAServiceItStartsForTheFirstTime(t *testing.T) {
 		"only the started unit is enabled, before its restart")
 }
 
+// A run that cannot reach the service manager the install recorded, such
+// as an SSH session or cron job without the user manager, stops before it
+// changes anything: going on would build, restart nothing and record the
+// install as unmanaged.
+func TestUpdateStopsWhenTheRecordedManagerIsUnreachable(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads[repos.Agent] = "b9999999999"
+
+	const reason = "systemctl --user is-system-running answered offline"
+
+	h.e.Host.ServiceManager = "none"
+	h.e.Host.ServiceManagerReason = reason
+	h.e.Services = services.New("none", h.runner, h.e.L, 1000)
+
+	before, err := os.ReadFile(h.e.L.StateFile())
+	require.NoError(t, err)
+
+	agent, err := os.ReadFile(h.e.L.AgentConfig())
+	require.NoError(t, err)
+
+	h.git.syncs.Store(0)
+	n := len(h.runner.Calls())
+
+	err = h.e.Update(context.Background(), UpdateOptions{Yes: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), reason, "the error says why the manager is unreachable")
+
+	var pe *ProblemsError
+	assert.NotErrorAs(t, err, &pe, "no run happened to report on")
+
+	assert.Zero(t, h.git.syncs.Load(), "nothing is fetched")
+	assert.Empty(t, h.runner.Calls()[n:], "nothing is built, validated or started")
+	assert.Empty(t, h.images.built)
+
+	after, err := os.ReadFile(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "the state is untouched")
+
+	agentAfter, err := os.ReadFile(h.e.L.AgentConfig())
+	require.NoError(t, err)
+	assert.Equal(t, string(agent), string(agentAfter), "no config is written")
+}
+
+func TestUpdateKeepsTheRecordedManager(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		recorded string
+		detected string
+		managed  bool
+	}{
+		{name: "systemd recorded and reachable", recorded: "systemd", detected: "systemd", managed: true},
+		{name: "none recorded, none detected", recorded: "none", detected: "none"},
+		{name: "none recorded, systemd detected", recorded: "none", detected: "systemd"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var h *harness
+			if tc.recorded == "none" {
+				h = declined(t)
+			} else {
+				h = installed(t, true)
+			}
+
+			h.e.Host.ServiceManager = tc.detected
+			h.e.Services = services.New(tc.detected, h.runner, h.e.L, 1000)
+			h.git.heads[repos.Agent] = "b9999999999"
+
+			require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+			if tc.managed {
+				assert.Equal(t, []string{repos.Agent}, restarts(h))
+			} else {
+				assert.Empty(t, systemctlCalls(h))
+				assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "start by hand")
+			}
+
+			st, _, err := state.Load(h.e.L.StateFile())
+			require.NoError(t, err)
+			assert.Equal(t, tc.recorded, st.ServiceManager)
+			assert.Equal(t, "b9999999999", st.Repos[repos.Agent].Commit)
+		})
+	}
+}
+
 func TestUpdateRequiresInstall(t *testing.T) {
 	h := newHarness(t, true)
 	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})

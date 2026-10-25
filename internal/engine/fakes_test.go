@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,9 +28,12 @@ type fakeGit struct {
 	changed map[string]bool // path -> PathChanged answer
 	logs    map[string][]repos.Change
 	errs    map[string]error
+	syncs   atomic.Int32
 }
 
 func (g *fakeGit) Sync(_ context.Context, dir, _ string, _ io.Writer) (string, error) {
+	g.syncs.Add(1)
+
 	name := filepath.Base(dir)
 	if err := os.MkdirAll(filepath.Join(dir, "workflow-skills"), 0o755); err != nil {
 		return "", err

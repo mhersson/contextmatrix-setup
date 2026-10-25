@@ -128,6 +128,11 @@ restart, or an unhealthy service. A service held back because `server.yaml` has
 no github block or docker is missing shows as not started, which is not a
 problem.
 
+When the install manages its services with systemd or launchd and the run
+cannot reach that user manager, as from an SSH session or a cron job without
+one, `update` stops before it fetches anything and exits 1 with an error that
+names the cause. Rerun it where the user manager is reachable.
+
 With `NO_COLOR` set, `TERM=dumb`, or output that is not a terminal (a pipe, a
 log), `update` prints plain text with the same layout, no colours and no escape
 codes. Subprocess output streams inline and no run log is written.

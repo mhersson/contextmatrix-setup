@@ -37,6 +37,12 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 
+			// Before the self-update too, which fetches, builds and records
+			// the installer's own repo.
+			if err := e.CheckServiceManager(); err != nil {
+				return err
+			}
+
 			mode := ui.Mode{Plain: true, Width: 100}
 			out := e.Out
 
