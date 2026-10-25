@@ -58,11 +58,11 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		}
 
 		heads[name] = head[name]
-		e.logf("%-22s %s", name, repos.Short(head[name]))
+		e.logf("%-*s %s", repos.NameWidth(), name, repos.Short(head[name]))
 	}
 
 	for _, repo := range repos.Apps {
-		say := func(cmd string) { e.logf("%-22s %s", repo, cmd) }
+		say := func(cmd string) { e.logf("%-*s %s", repos.NameWidth(), repo, cmd) }
 		if err := e.buildBinary(ctx, repo, e.Out, say); err != nil {
 			return err
 		}
@@ -133,13 +133,13 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		}
 
 		for _, d := range res.Dropped {
-			e.logf("%-22s %s", filepath.Base(res.Path), droppedText(d))
+			e.logf("%-*s %s", repos.NameWidth(), filepath.Base(res.Path), droppedText(d))
 		}
 
 		results[repo] = res
 		st.Configs[filepath.Base(res.Path)] = state.ConfigHash{SHA256: res.Hash}
 
-		e.logf("%-22s written", filepath.Base(res.Path))
+		e.logf("%-*s written", repos.NameWidth(), filepath.Base(res.Path))
 	}
 
 	files, _, err := e.copyWorkflowSkills(nil)
@@ -160,7 +160,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		valid[repo] = invalid[repo] == nil
 
 		if err := invalid[repo]; err != nil {
-			e.logf("%-22s invalid: %v", filepath.Base(results[repo].Path), err)
+			e.logf("%-*s invalid: %v", repos.NameWidth(), filepath.Base(results[repo].Path), err)
 		}
 	}
 
@@ -186,7 +186,7 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		}
 
 		for _, n := range e.disableHeldBack(ctx, github, st.Images) {
-			e.logf("%-22s %s", n.name, n.text)
+			e.logf("%-*s %s", repos.NameWidth(), n.name, n.text)
 		}
 
 		if a.Linger && e.Host.OS == "linux" {
@@ -457,7 +457,7 @@ func (e *Engine) installUnits(ctx context.Context, trees Trees) error {
 		}
 
 		if changed {
-			e.logf("%-22s unit written", repo)
+			e.logf("%-*s unit written", repos.NameWidth(), repo)
 		}
 	}
 
@@ -480,16 +480,16 @@ func (e *Engine) startEligible(ctx context.Context, github bool, valid map[strin
 	for _, repo := range repos.Apps {
 		switch skip := e.skipReason(repo, github); {
 		case skip != "":
-			e.logf("%-22s not started: %s", repo, skip)
+			e.logf("%-*s not started: %s", repos.NameWidth(), repo, skip)
 		case !valid[repo]:
-			e.logf("%-22s not started: config invalid", repo)
+			e.logf("%-*s not started: config invalid", repos.NameWidth(), repo)
 		case hold[repo] != "":
-			e.logf("%-22s not started: %s", repo, hold[repo])
+			e.logf("%-*s not started: %s", repos.NameWidth(), repo, hold[repo])
 		default:
 			if err := e.Services.Start(ctx, repo); err != nil {
-				e.logf("%-22s start failed: %v", repo, err)
+				e.logf("%-*s start failed: %v", repos.NameWidth(), repo, err)
 			} else {
-				e.logf("%-22s started", repo)
+				e.logf("%-*s started", repos.NameWidth(), repo)
 
 				started[repo] = true
 			}

@@ -80,7 +80,7 @@ func (e *Engine) Status(ctx context.Context) (Status, error) {
 }
 
 func (e *Engine) PrintStatus(s Status) {
-	e.logf("%-22s %-9s %-9s %-8s %s", "component", "installed", "cached", "port", "service")
+	e.logf("%-*s %-9s %-9s %-8s %s", repos.NameWidth(), "component", "installed", "cached", "port", "service")
 
 	for i, r := range s.Repos {
 		svc := s.Services[i]
@@ -94,7 +94,7 @@ func (e *Engine) PrintStatus(s Status) {
 			active = "unmanaged"
 		}
 
-		e.logf("%-22s %-9s %-9s %-8d %s", r.Name, repos.Short(r.Installed), repos.Short(r.Cached), s.Ports[r.Name], active)
+		e.logf("%-*s %-9s %-9s %-8d %s", repos.NameWidth(), r.Name, repos.Short(r.Installed), repos.Short(r.Cached), s.Ports[r.Name], active)
 	}
 
 	e.logf("docker: %v   service manager: %s", s.Docker, s.Manager)
@@ -115,7 +115,7 @@ func (e *Engine) PrintStatus(s Status) {
 			line += "  variants: " + strings.Join(vs, " ")
 		}
 
-		e.logf("%-22s %s", family, line)
+		e.logf("%-*s %s", repos.NameWidth(), family, line)
 	}
 }
 
@@ -139,7 +139,7 @@ func (e *Engine) Uninstall(ctx context.Context) error {
 			return fmt.Errorf("remove %s service: %w", repo, err)
 		}
 
-		e.logf("%-22s service removed", repo)
+		e.logf("%-*s service removed", repos.NameWidth(), repo)
 	}
 
 	e.logf("kept: %s, %s, binaries in %s", e.L.ConfigDir, e.L.StateDir, e.Host.GoBin)

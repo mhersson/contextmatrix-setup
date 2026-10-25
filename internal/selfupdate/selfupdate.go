@@ -150,7 +150,7 @@ func (r *reporter) skipped(err error) {
 
 func (r *reporter) rebuilding(head string) io.Writer {
 	if r.c == nil {
-		fmt.Fprintf(r.out, "%-22s rebuilding %s\n", repos.Setup, repos.Short(head))
+		fmt.Fprintf(r.out, "%-*s rebuilding %s\n", repos.NameWidth(), repos.Setup, repos.Short(head))
 
 		return r.out
 	}
@@ -189,7 +189,7 @@ func (r *reporter) box(title string) {
 func (r *reporter) done(old, head string, restarting bool) {
 	if r.c == nil {
 		if restarting {
-			fmt.Fprintf(r.out, "%-22s restarting with the new binary\n", repos.Setup)
+			fmt.Fprintf(r.out, "%-*s restarting with the new binary\n", repos.NameWidth(), repos.Setup)
 		}
 
 		return

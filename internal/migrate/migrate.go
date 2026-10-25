@@ -13,6 +13,7 @@ import (
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
+	"github.com/mhersson/contextmatrix-setup/internal/repos"
 )
 
 var stateFileNames = []string{"auth.db", "images.db", "ops.db", "master.key", "instance_id"}
@@ -261,7 +262,7 @@ func load(path string) (configsync.Tree, error) {
 func Apply(moves []Move, out io.Writer) error {
 	for _, m := range moves {
 		if !exists(m.From) {
-			fmt.Fprintf(out, "%-22s skip: %s does not exist\n", "migrate", m.From)
+			fmt.Fprintf(out, "%-*s skip: %s does not exist\n", repos.NameWidth(), "migrate", m.From)
 
 			continue
 		}
@@ -288,7 +289,7 @@ func Apply(moves []Move, out io.Writer) error {
 			}
 		}
 
-		fmt.Fprintf(out, "%-22s %s -> %s\n", "migrate", m.From, m.To)
+		fmt.Fprintf(out, "%-*s %s -> %s\n", repos.NameWidth(), "migrate", m.From, m.To)
 	}
 
 	return nil
