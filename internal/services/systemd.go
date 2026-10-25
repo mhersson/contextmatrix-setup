@@ -38,26 +38,34 @@ func (m *systemd) ctl(ctx context.Context, args ...string) error {
 	return nil
 }
 
+// Install writes the unit without enabling it: Start and Restart enable, so
+// a service setup holds back does not start at the next boot either.
 func (m *systemd) Install(ctx context.Context, s Service) (bool, error) {
 	changed, err := writeUnit(m.UnitPath(s.Name), RenderSystemd(s))
-	if err != nil {
+	if err != nil || !changed {
 		return false, err
 	}
 
-	if changed {
-		if err := m.ctl(ctx, "daemon-reload"); err != nil {
-			return true, err
-		}
-	}
-
-	return changed, m.ctl(ctx, "enable", s.Name)
+	return true, m.ctl(ctx, "daemon-reload")
 }
 
-func (m *systemd) Start(ctx context.Context, name string) error { return m.ctl(ctx, "start", name) }
+func (m *systemd) Start(ctx context.Context, name string) error {
+	if err := m.ctl(ctx, "enable", name); err != nil {
+		return err
+	}
+
+	return m.ctl(ctx, "start", name)
+}
 
 func (m *systemd) Stop(ctx context.Context, name string) error { return m.ctl(ctx, "stop", name) }
 
-func (m *systemd) Restart(ctx context.Context, name string) error { return m.ctl(ctx, "restart", name) }
+func (m *systemd) Restart(ctx context.Context, name string) error {
+	if err := m.ctl(ctx, "enable", name); err != nil {
+		return err
+	}
+
+	return m.ctl(ctx, "restart", name)
+}
 
 func (m *systemd) Active(ctx context.Context, name string) (bool, error) {
 	res, err := m.r.Run(ctx, run.Cmd{Name: "systemctl", Args: []string{"--user", "is-active", name}})

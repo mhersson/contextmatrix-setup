@@ -91,6 +91,19 @@ func restarts(h *harness) []string {
 	return out
 }
 
+// enables lists the units enabled, in call order.
+func enables(h *harness) []string {
+	var out []string
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == "systemctl" && len(c.Args) == 3 && c.Args[1] == "enable" {
+			out = append(out, c.Args[2])
+		}
+	}
+
+	return out
+}
+
 // validations counts the runs of repo's own config validation.
 func validations(h *harness, repo string) int {
 	n := 0
@@ -404,6 +417,42 @@ func TestUpdateValidatesABackendOnceDockerIsThere(t *testing.T) {
 	assert.Contains(t, restarts(h), repos.Chat)
 }
 
+// A unit is enabled only once setup starts it: the server held back for its
+// github block is enabled by the update that starts it.
+func TestUpdateEnablesAServiceItStartsForTheFirstTime(t *testing.T) {
+	h := newHarness(t, true)
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	require.NoError(t, h.e.Install(context.Background(), a))
+	require.NotContains(t, starts(h), repos.Server)
+	assert.NotContains(t, enables(h), repos.Server, "a unit setup did not start is not enabled")
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+	configsync.Set(server, "github.auth_mode", "pat")
+	configsync.Set(server, "github.pat.token", "x")
+	data, err := configsync.Encode(server, referenceFor(repos.Server))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(h.e.L.ServerConfig(), data, 0o600))
+
+	n := len(h.runner.Calls())
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{repos.Server}, restarts(h))
+
+	var update []string
+
+	for _, c := range h.runner.Calls()[n:] {
+		if c.Name == "systemctl" {
+			update = append(update, strings.Join(c.Args, " "))
+		}
+	}
+
+	assert.Equal(t, []string{"--user enable " + repos.Server, "--user restart " + repos.Server}, update,
+		"only the started unit is enabled, before its restart")
+}
+
 func TestUpdateRequiresInstall(t *testing.T) {
 	h := newHarness(t, true)
 	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
@@ -579,8 +628,8 @@ func TestUpdateHoldsANewArchitectWhosePortIsTaken(t *testing.T) {
 	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
 }
 
-// A held architect's unit stays enabled, so the init system can start it; its
-// own listener must not hold it again.
+// An architect already running, such as one started by hand after it was
+// held, owns the listener on its port, which must not hold it again.
 func TestUpdateDoesNotHoldAnArchitectThatIsAlreadyRunning(t *testing.T) {
 	h := installed(t, true)
 	preArchitect(t, h, placeholderBlock())

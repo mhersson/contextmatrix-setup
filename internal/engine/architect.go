@@ -31,8 +31,8 @@ func fillArchitectBlock(force map[string]any, user, opinionated configsync.Tree)
 
 // holdNewArchitect names why an architect this run adds must not start: its
 // port is taken, so it would only restart in a loop. Only a new architect is
-// checked, and not one already running: a held unit stays enabled, so the
-// init system can start it, and then the listener on the port is its own.
+// checked, and not one already running: the listener on the port is then its
+// own.
 func (e *Engine) holdNewArchitect(ctx context.Context, isNew bool, architect configsync.Tree) string {
 	if !isNew {
 		return ""

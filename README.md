@@ -168,11 +168,12 @@ The architect's state (`architect.db`, code checkouts, exports) lives in
 
 Units are installer-owned. On Linux, customise with
 `systemctl --user edit <name>`; the installer never touches drop-ins. On macOS
-edit the config file, not the plist. launchd loads every plist in
-`~/Library/LaunchAgents` at login, so a service the installer did not start
-(GitHub skipped, invalid config, no docker, architect port taken) still starts
-at the next login until the cause is fixed and `contextmatrix-setup update` is
-run.
+edit the config file, not the plist. A unit is enabled only when the installer
+starts it, so a service it has not started (GitHub skipped, invalid config, no
+docker, architect port taken) does not start at boot or login either; the
+`update` that starts it enables it. On macOS a new plist is disabled with
+`launchctl disable` until then, since launchd loads every plist in
+`~/Library/LaunchAgents` at login.
 
 ## Worker images
 
@@ -236,3 +237,9 @@ Run after changes to services or images; CI covers Linux only.
    the four labels and the configs remain.
 6. Confirm `~/Library/Logs/contextmatrix/contextmatrix-architect.log` shows the
    architect listening, and that `contextmatrix-setup status` lists `rg`.
+7. Install with `--github-mode skip`; confirm
+   `launchctl print-disabled gui/$UID` lists
+   `com.github.mhersson.contextmatrix` as disabled. Fill in the github block,
+   run `contextmatrix-setup update`, and confirm it is listed as enabled and
+   `launchctl print gui/$UID/com.github.mhersson.contextmatrix` shows it
+   running.

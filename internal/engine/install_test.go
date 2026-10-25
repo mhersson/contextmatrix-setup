@@ -137,7 +137,7 @@ func TestInstallFreshWithDocker(t *testing.T) {
 
 // The server waits for its github block and the worker backends for
 // docker; neither is reported invalid for the values their validators
-// reject until then.
+// reject until then, and neither unit is enabled.
 func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 	h := newHarness(t, false)
 	rejectIncomplete(h)
@@ -153,6 +153,7 @@ func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 
 	assert.Equal(t, []string{"contextmatrix-architect"}, starts(h),
 		"the server needs its github block and the worker backends need docker; the architect needs neither")
+	assert.Equal(t, []string{"contextmatrix-architect"}, enables(h), "only the started unit is enabled")
 
 	for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
 		assert.Zero(t, validations(h, repo), "%s is held back, so it is not validated", repo)
@@ -180,6 +181,7 @@ func TestInstallDoesNotStartAnEligibleInvalidConfig(t *testing.T) {
 	require.NoError(t, h.e.Install(context.Background(), a))
 
 	assert.Equal(t, []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"}, starts(h))
+	assert.Equal(t, starts(h), enables(h), "a unit is enabled only when started")
 	assert.Contains(t, h.out.String(), "contextmatrix_url is required")
 }
 

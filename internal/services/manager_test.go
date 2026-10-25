@@ -14,7 +14,9 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 )
 
-func TestSystemdInstallWritesReloadsEnables(t *testing.T) {
+// A unit is enabled only when setup starts it, so writing one leaves a
+// service held back at install out of the next boot.
+func TestSystemdInstallWritesAndReloadsWithoutEnabling(t *testing.T) {
 	home := t.TempDir()
 	l := layout.New(home, nil)
 	f := run.NewFake()
@@ -32,15 +34,12 @@ func TestSystemdInstallWritesReloadsEnables(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, wantSystemd, string(data))
 
-	calls := f.Calls()
-	require.Len(t, calls, 2)
-	assert.Equal(t, []string{"--user", "daemon-reload"}, calls[0].Args)
-	assert.Equal(t, []string{"--user", "enable", "contextmatrix-agent"}, calls[1].Args)
+	assert.Equal(t, [][]string{{"--user", "daemon-reload"}}, argsOf(f))
 
 	changed, err = m.Install(context.Background(), agentService())
 	require.NoError(t, err)
 	assert.False(t, changed, "identical unit is not rewritten")
-	assert.Len(t, f.Calls(), 3, "only enable runs on an unchanged unit")
+	assert.Len(t, f.Calls(), 1, "nothing runs for an unchanged unit")
 }
 
 func TestSystemdLifecycle(t *testing.T) {
@@ -51,9 +50,18 @@ func TestSystemdLifecycle(t *testing.T) {
 	f.On("journalctl").Return("line1\nline2\n", "", 0)
 
 	m := New("systemd", f, l, 1000)
+	enable := []string{"--user", "enable", "contextmatrix"}
+
+	n := len(f.Calls())
 
 	require.NoError(t, m.Start(context.Background(), Server))
+	assertBefore(t, argsOf(f)[n:], enable, []string{"--user", "start", "contextmatrix"}, "start enables the unit first")
+
+	n = len(f.Calls())
+
 	require.NoError(t, m.Restart(context.Background(), Server))
+	assertBefore(t, argsOf(f)[n:], enable, []string{"--user", "restart", "contextmatrix"}, "restart enables the unit first")
+
 	require.NoError(t, m.Stop(context.Background(), Server))
 
 	active, err := m.Active(context.Background(), Server)
@@ -71,8 +79,6 @@ func TestSystemdLifecycle(t *testing.T) {
 		args = append(args, c.Args)
 	}
 
-	assert.Contains(t, args, []string{"--user", "start", "contextmatrix"})
-	assert.Contains(t, args, []string{"--user", "restart", "contextmatrix"})
 	assert.Contains(t, args, []string{"--user", "stop", "contextmatrix"})
 	assert.Contains(t, args, []string{"--user", "-u", "contextmatrix", "-n", "20", "--no-pager", "-o", "cat"})
 	assert.Contains(t, args, []string{"--user", "disable", "contextmatrix"})
@@ -97,7 +103,13 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, active)
 
+	n := len(f.Calls())
+
 	require.NoError(t, m.Restart(context.Background(), Agent))
+
+	target := "gui/501/com.github.mhersson.contextmatrix-agent"
+	assertBefore(t, argsOf(f)[n:], []string{"enable", target}, []string{"kickstart", "-k", target}, "restart enables the agent first")
+
 	require.NoError(t, m.Stop(context.Background(), Agent))
 
 	logs, err := m.Logs(context.Background(), Agent, 5)
@@ -117,9 +129,12 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	assert.Contains(t, args, bootout)
 	assert.Contains(t, args, bootstrap)
 	assert.Less(t, indexOf(args, bootout), indexOf(args, bootstrap), "bootout precedes bootstrap")
-	assert.Contains(t, args, []string{"kickstart", "-k", "gui/501/com.github.mhersson.contextmatrix-agent"})
+	assert.NotContains(t, args, []string{"disable", target}, "a loaded agent is running and stays enabled")
 }
 
+// launchd loads every plist in LaunchAgents at login, so a new plist is
+// disabled until Start enables it, the way a systemd unit is enabled only
+// when started.
 func TestLaunchdInstallNeverBootstraps(t *testing.T) {
 	l := layout.New(t.TempDir(), nil)
 	f := run.NewFake()
@@ -132,12 +147,31 @@ func TestLaunchdInstallNeverBootstraps(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, changed)
 
+	target := "gui/501/com.github.mhersson.contextmatrix-agent"
 	bootstrap := []string{"bootstrap", "gui/501", m.UnitPath(Agent)}
 	assert.NotContains(t, argsOf(f), bootstrap, "writing a plist must not start the agent")
-	assert.NotContains(t, argsOf(f), []string{"bootout", "gui/501/com.github.mhersson.contextmatrix-agent"})
+	assert.NotContains(t, argsOf(f), []string{"bootout", target})
+	assert.Contains(t, argsOf(f), []string{"disable", target}, "a new plist does not load at the next login")
+	assert.NotContains(t, argsOf(f), []string{"enable", target})
+
+	changed, err = m.Install(context.Background(), agentService())
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	disables := 0
+
+	for _, a := range argsOf(f) {
+		if a[0] == "disable" {
+			disables++
+		}
+	}
+
+	assert.Equal(t, 1, disables, "only a new plist is disabled")
+
+	n := len(f.Calls())
 
 	require.NoError(t, m.Start(context.Background(), Agent))
-	assert.Contains(t, argsOf(f), bootstrap)
+	assertBefore(t, argsOf(f)[n:], []string{"enable", target}, bootstrap, "start enables the agent before loading it")
 }
 
 func argsOf(f *run.Fake) [][]string {
@@ -162,6 +196,16 @@ func TestNoneManagerIsInert(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, active)
 	require.NoError(t, m.Start(context.Background(), Server))
+}
+
+// assertBefore asserts that both calls ran, first before then.
+func assertBefore(t *testing.T, args [][]string, first, then []string, msg string) {
+	t.Helper()
+
+	i, j := indexOf(args, first), indexOf(args, then)
+	require.GreaterOrEqual(t, i, 0, msg)
+	require.GreaterOrEqual(t, j, 0, msg)
+	assert.Less(t, i, j, msg)
 }
 
 func indexOf(args [][]string, want []string) int {
