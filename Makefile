@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint fmt install
+.PHONY: build test test-race test-integration lint fmt install
 
 build:
 	go build -trimpath -o contextmatrix-setup .
@@ -10,7 +10,7 @@ test:
 	go test ./...
 
 test-race:
-	go test -race -count=1 ./...
+	CGO_ENABLED=1 go test -race -count=1 ./...
 
 test-integration:
 	go test -tags integration -count=1 ./internal/integration/...
