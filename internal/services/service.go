@@ -41,6 +41,7 @@ type Manager interface {
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
+	Disable(ctx context.Context, name string) error
 	Active(ctx context.Context, name string) (bool, error)
 	Remove(ctx context.Context, name string) error
 	Logs(ctx context.Context, name string, lines int) (string, error)

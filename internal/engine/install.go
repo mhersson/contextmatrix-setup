@@ -186,6 +186,10 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 			return err
 		}
 
+		for _, n := range e.disableHeldBack(ctx, github, st.Images) {
+			e.logf("%-22s %s", n.name, n.text)
+		}
+
 		if a.Linger && e.Host.OS == "linux" {
 			e.enableLinger(ctx)
 		}

@@ -173,12 +173,15 @@ The architect's state (`architect.db`, code checkouts, exports) lives in
 
 Units are installer-owned. On Linux, customise with
 `systemctl --user edit <name>`; the installer never touches drop-ins. On macOS
-edit the config file, not the plist. A unit is enabled only when the installer
-starts it, so a service it has not started (GitHub skipped, invalid config, no
-docker, architect port taken) does not start at boot or login either; the
-`update` that starts it enables it. On macOS a new plist is disabled with
-`launchctl disable` until then, since launchd loads every plist in
-`~/Library/LaunchAgents` at login.
+edit the config file, not the plist. A unit is enabled when the installer
+starts it, not when it writes it, so a service it holds back (GitHub skipped,
+invalid config, no docker, architect port taken) does not start at boot or
+login either; the `update` that starts it enables it. A service that cannot
+run yet, a server without its github block or a backend with no docker and no
+worker image, has its unit disabled by every `install` and `update`, even one
+enabled before. On macOS a new plist is disabled with `launchctl disable` until
+it is started, since launchd loads every plist in `~/Library/LaunchAgents` at
+login.
 
 ## Worker images
 

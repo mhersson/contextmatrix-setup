@@ -131,6 +131,27 @@ func needsDocker(repo string) bool {
 	return repo == repos.Agent || repo == repos.Chat
 }
 
+// disableHeldBack disables, best-effort, the unit of each repo whose skip
+// reason keeps it from running at all, so a unit enabled before does not
+// start at boot or login on a file its validator rejects. A backend with a
+// built image is left alone: its file is complete and docker may be down
+// only for now. Each failure comes back as a note.
+func (e *Engine) disableHeldBack(ctx context.Context, github bool, built map[string]state.Image) []note {
+	var notes []note
+
+	for _, repo := range repos.Apps {
+		if e.skipReason(repo, github) == "" || (needsDocker(repo) && built[images.Family(repo)].Tag != "") {
+			continue
+		}
+
+		if err := e.Services.Disable(ctx, repo); err != nil {
+			notes = append(notes, note{repo, "could not disable its unit: " + err.Error()})
+		}
+	}
+
+	return notes
+}
+
 // skipReason names the documented reason a repo is not started on this
 // host, "" when there is none. Its file lacks the matching values until
 // then, which its validator rejects, so such a repo is not validated either.

@@ -119,6 +119,10 @@ func (m *launchd) Restart(ctx context.Context, name string) error {
 	return m.ctl(ctx, "kickstart", "-k", m.target(name))
 }
 
+func (m *launchd) Disable(ctx context.Context, name string) error {
+	return m.ctl(ctx, "disable", m.target(name))
+}
+
 func (m *launchd) Active(ctx context.Context, name string) (bool, error) {
 	res, err := m.r.Run(ctx, run.Cmd{Name: "launchctl", Args: []string{"print", m.target(name)}})
 	if err != nil {

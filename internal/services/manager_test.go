@@ -64,6 +64,11 @@ func TestSystemdLifecycle(t *testing.T) {
 
 	require.NoError(t, m.Stop(context.Background(), Server))
 
+	n = len(f.Calls())
+
+	require.NoError(t, m.Disable(context.Background(), Server))
+	assert.Equal(t, [][]string{{"--user", "disable", "contextmatrix"}}, argsOf(f)[n:])
+
 	active, err := m.Active(context.Background(), Server)
 	require.NoError(t, err)
 	assert.True(t, active)
@@ -99,6 +104,9 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, changed)
 
+	target := "gui/501/com.github.mhersson.contextmatrix-agent"
+	assert.NotContains(t, argsOf(f), []string{"disable", target}, "a loaded agent is running and stays enabled")
+
 	active, err := m.Active(context.Background(), Agent)
 	require.NoError(t, err)
 	assert.True(t, active)
@@ -106,11 +114,14 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	n := len(f.Calls())
 
 	require.NoError(t, m.Restart(context.Background(), Agent))
-
-	target := "gui/501/com.github.mhersson.contextmatrix-agent"
 	assertBefore(t, argsOf(f)[n:], []string{"enable", target}, []string{"kickstart", "-k", target}, "restart enables the agent first")
 
 	require.NoError(t, m.Stop(context.Background(), Agent))
+
+	n = len(f.Calls())
+
+	require.NoError(t, m.Disable(context.Background(), Agent))
+	assert.Equal(t, [][]string{{"disable", target}}, argsOf(f)[n:])
 
 	logs, err := m.Logs(context.Background(), Agent, 5)
 	require.NoError(t, err)
@@ -129,7 +140,6 @@ func TestLaunchdInstallAndLifecycle(t *testing.T) {
 	assert.Contains(t, args, bootout)
 	assert.Contains(t, args, bootstrap)
 	assert.Less(t, indexOf(args, bootout), indexOf(args, bootstrap), "bootout precedes bootstrap")
-	assert.NotContains(t, args, []string{"disable", target}, "a loaded agent is running and stays enabled")
 }
 
 // launchd loads every plist in LaunchAgents at login, so a new plist is
@@ -196,6 +206,7 @@ func TestNoneManagerIsInert(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, active)
 	require.NoError(t, m.Start(context.Background(), Server))
+	require.NoError(t, m.Disable(context.Background(), Server))
 }
 
 // assertBefore asserts that both calls ran, first before then.

@@ -154,6 +154,8 @@ func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 	assert.Equal(t, []string{"contextmatrix-architect"}, starts(h),
 		"the server needs its github block and the worker backends need docker; the architect needs neither")
 	assert.Equal(t, []string{"contextmatrix-architect"}, enables(h), "only the started unit is enabled")
+	assert.Equal(t, []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"}, disables(h),
+		"a unit an earlier install enabled for them is disabled")
 
 	for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
 		assert.Zero(t, validations(h, repo), "%s is held back, so it is not validated", repo)
@@ -441,6 +443,7 @@ func TestInstallHoldsTheArchitectWhenItsPortIsTaken(t *testing.T) {
 	require.NoError(t, h.e.Install(context.Background(), a))
 
 	assert.Equal(t, []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"}, starts(h))
+	assert.Empty(t, disables(h), "a held architect runs once its port is free")
 
 	st, _, err := state.Load(h.e.L.StateFile())
 	require.NoError(t, err)

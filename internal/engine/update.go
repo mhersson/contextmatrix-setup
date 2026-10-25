@@ -327,6 +327,8 @@ func (e *Engine) Update(ctx context.Context, opts UpdateOptions) error {
 
 			unitChanged[repo] = changed
 		}
+
+		printNotes(c, e.disableHeldBack(ctx, github, st.Images)...)
 	}
 
 	var (

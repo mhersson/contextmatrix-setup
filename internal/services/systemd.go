@@ -67,6 +67,8 @@ func (m *systemd) Restart(ctx context.Context, name string) error {
 	return m.ctl(ctx, "restart", name)
 }
 
+func (m *systemd) Disable(ctx context.Context, name string) error { return m.ctl(ctx, "disable", name) }
+
 func (m *systemd) Active(ctx context.Context, name string) (bool, error) {
 	res, err := m.r.Run(ctx, run.Cmd{Name: "systemctl", Args: []string{"--user", "is-active", name}})
 	if err != nil {
