@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -177,10 +176,19 @@ func isInstalled(e *engine.Engine) (bool, error) {
 	return st.Installed(), nil
 }
 
+// updateInstead runs an update on the console and with the question the
+// update command uses.
 func updateInstead(cmd *cobra.Command, e *engine.Engine, yes bool) error {
-	fmt.Fprintln(cmd.OutOrStdout(), "already installed; running update instead")
+	c, closeConsole, err := openUpdateConsole(cmd, e)
+	if err != nil {
+		return err
+	}
 
-	return e.Update(cmd.Context(), engine.UpdateOptions{Yes: yes, Confirm: confirmPrompt(cmd)})
+	defer closeConsole()
+
+	c.Println("already installed; running update instead")
+
+	return e.Update(cmd.Context(), engine.UpdateOptions{Yes: yes, Confirm: updateConfirm(c, os.Stdin), UI: c})
 }
 
 // migrateInstall moves the old layout and returns the answers it carried,
@@ -235,19 +243,4 @@ func finishInstall(cmd *cobra.Command, e *engine.Engine, a engine.Answers, known
 	}
 
 	return e.Install(ctx, a)
-}
-
-// confirmPrompt asks a plain y/N question on the command's input.
-func confirmPrompt(cmd *cobra.Command) func(string) bool {
-	return func(string) bool {
-		fmt.Fprint(cmd.OutOrStdout(), "Continue? [Y/n] ")
-
-		var answer string
-
-		if _, err := fmt.Fscanln(os.Stdin, &answer); err != nil && !errors.Is(err, os.ErrClosed) {
-			return true
-		}
-
-		return answer == "" || answer == "y" || answer == "Y"
-	}
 }

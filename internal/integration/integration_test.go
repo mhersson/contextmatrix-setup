@@ -200,6 +200,33 @@ exit 0
 	assert.NoDirExists(t, filepath.Join(e.home, ".cache", "contextmatrix-setup", "src", "contextmatrix-setup"), "the installer's own repo is not fetched")
 }
 
+// install on an installed system runs an update, which asks before it
+// applies the way update does: only a yes applies.
+func TestInstallOnAnInstalledSystemAsksLikeUpdate(t *testing.T) {
+	e := newEnv(t)
+
+	// Without GitHub the server is not started, so applying the update
+	// rebuilds it without a restart to probe.
+	out, err := e.run("install", "--yes", "--auth-mode", "none", "--github-mode", "skip")
+	require.NoError(t, err, out)
+
+	e.commit("contextmatrix", "x.go", "package x\n")
+
+	for _, tc := range []struct {
+		answer  string
+		applies bool
+	}{
+		{answer: "no thanks\n", applies: false},
+		{answer: "yes\n", applies: true},
+	} {
+		require.NoError(t, os.Remove(e.log))
+
+		out, err := e.runInput(tc.answer, "install")
+		require.NoError(t, err, out)
+		assert.Equal(t, tc.applies, strings.Contains(e.stubLog(), "make install contextmatrix\n"), "answer %q: %s", tc.answer, out)
+	}
+}
+
 func TestMigrateFromOldLayout(t *testing.T) {
 	e := newEnv(t)
 
