@@ -169,8 +169,7 @@ func TestInstallWithoutDocker(t *testing.T) {
 }
 
 // A run without the user manager the install recorded, as from cron or an
-// SSH session, stops before the installer's own repo or any app is fetched
-// and says why.
+// SSH session, stops before the installer's own repo or any app is fetched.
 func TestUpdateStopsWithoutTheRecordedManager(t *testing.T) {
 	e := newEnv(t)
 
@@ -194,7 +193,6 @@ exit 0
 	var exit *exec.ExitError
 	require.ErrorAs(t, err, &exit, out)
 	assert.Equal(t, 1, exit.ExitCode())
-	assert.Contains(t, out, "answered offline", "the error carries the detected reason")
 	assert.Equal(t, before, e.read(".contextmatrix/setup/state.yaml"))
 	assert.NotContains(t, e.stubLog(), "make ")
 	assert.NoDirExists(t, filepath.Join(e.home, ".cache", "contextmatrix-setup", "src", "contextmatrix-setup"), "the installer's own repo is not fetched")

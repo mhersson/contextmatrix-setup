@@ -101,6 +101,17 @@ func (e *Engine) CheckServiceManager() error {
 	return e.recordedManagerReachable(st.ServiceManager)
 }
 
+// ManagerUnreachableError stops a run whose install recorded a service
+// manager this run's detection cannot reach, for the Reason detection gave.
+type ManagerUnreachableError struct {
+	Recorded string
+	Reason   string
+}
+
+func (e *ManagerUnreachableError) Error() string {
+	return fmt.Sprintf("recorded service manager is %s but the user manager is not reachable (%s); rerun when it is", e.Recorded, e.Reason)
+}
+
 // recordedManagerReachable fails when the install recorded systemd or
 // launchd and this run detects none, as from an SSH session or a cron job
 // without the user manager: going on would restart nothing.
@@ -114,7 +125,7 @@ func (e *Engine) recordedManagerReachable(recorded string) error {
 		reason = "none detected"
 	}
 
-	return fmt.Errorf("recorded service manager is %s but the user manager is not reachable (%s); rerun when it is", recorded, reason)
+	return &ManagerUnreachableError{Recorded: recorded, Reason: reason}
 }
 
 func (e *Engine) logf(format string, args ...any) {
