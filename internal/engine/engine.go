@@ -12,6 +12,7 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 	"github.com/mhersson/contextmatrix-setup/internal/services"
+	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
 type Git interface {
@@ -89,16 +90,74 @@ func (e *Engine) useRecordedManager(kind string) {
 	}
 }
 
-func (e *Engine) logf(format string, args ...any) {
-	fmt.Fprintf(e.Out, format+"\n", args...)
+// CheckServiceManager stops a run before it fetches anything when the
+// install recorded a service manager this run cannot reach.
+func (e *Engine) CheckServiceManager() error {
+	st, _, err := state.Load(e.L.StateFile())
+	if err != nil {
+		return err
+	}
+
+	return e.recordedManagerReachable(st.ServiceManager)
 }
 
-func binaryFor(repo string) string {
-	return repo
+// recordedManagerReachable fails when the install recorded systemd or
+// launchd and this run detects none, as from an SSH session or a cron job
+// without the user manager: going on would restart nothing.
+func (e *Engine) recordedManagerReachable(recorded string) error {
+	if (recorded != "systemd" && recorded != "launchd") || e.Services.Kind() != "none" {
+		return nil
+	}
+
+	reason := e.Host.ServiceManagerReason
+	if reason == "" {
+		reason = "none detected"
+	}
+
+	return fmt.Errorf("recorded service manager is %s but the user manager is not reachable (%s); rerun when it is", recorded, reason)
+}
+
+func (e *Engine) logf(format string, args ...any) {
+	fmt.Fprintf(e.Out, format+"\n", args...)
 }
 
 // needsDocker reports whether a repo's service runs its workers in
 // containers. The architect is one process and runs without docker.
 func needsDocker(repo string) bool {
 	return repo == repos.Agent || repo == repos.Chat
+}
+
+// disableHeldBack disables, best-effort, the unit of each repo whose skip
+// reason keeps it from running at all, so a unit enabled before does not
+// start at boot or login on a file its validator rejects. A backend with a
+// built image is left alone: its file is complete and docker may be down
+// only for now. Each failure comes back as a note.
+func (e *Engine) disableHeldBack(ctx context.Context, github bool, built map[string]state.Image) []note {
+	var notes []note
+
+	for _, repo := range repos.Apps {
+		if e.skipReason(repo, github) == "" || (needsDocker(repo) && built[images.Family(repo)].Tag != "") {
+			continue
+		}
+
+		if err := e.Services.Disable(ctx, repo); err != nil {
+			notes = append(notes, note{repo, "could not disable its unit: " + err.Error()})
+		}
+	}
+
+	return notes
+}
+
+// skipReason names the documented reason a repo is not started on this
+// host, "" when there is none. Its file lacks the matching values until
+// then, which its validator rejects, so such a repo is not validated either.
+func (e *Engine) skipReason(repo string, github bool) string {
+	switch {
+	case repo == repos.Server && !github:
+		return "github block missing in server.yaml; fill it in, then run update"
+	case needsDocker(repo) && !e.Host.Docker:
+		return "docker not available"
+	default:
+		return ""
+	}
 }

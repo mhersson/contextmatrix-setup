@@ -1,6 +1,10 @@
 # Canonical copy: contextmatrix-agent/.golangci.yaml - sync by full-file copy
-# plus repo-name word swap.
+# plus repo-name word swap, except: gosec's file-mode rules are excluded in
+# tests only (setup writes secrets), and lint covers the integration suite.
 version: "2"
+run:
+  build-tags:
+    - integration
 linters:
   default: none
   enable:
@@ -44,11 +48,11 @@ linters:
     # linter and its suppressions are deliberate per-line nolint directives.
     - linters: [gosec]
       text: "G104"
-    # G301/G302/G306: files written into chat workspaces are repo source files,
-    # not secrets - git checkouts use 0644/0755 and the worked code must keep
-    # standard modes. Secrets never go through these write paths.
+    # G301/G302/G306 in tests: fixtures create fake executables (0755) and
+    # permission cases. Production writes keep gosec's bar.
     - linters: [gosec]
       text: "G301|G302|G306"
+      path: "_test\\.go$"
     # Test fixtures legitimately use hardcoded credentials, variable URLs, and int conversions
     - linters: [gosec]
       text: "G101|G107|G115"

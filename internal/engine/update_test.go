@@ -91,6 +91,54 @@ func restarts(h *harness) []string {
 	return out
 }
 
+// enables lists the units enabled, in call order.
+func enables(h *harness) []string {
+	var out []string
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == "systemctl" && len(c.Args) == 3 && c.Args[1] == "enable" {
+			out = append(out, c.Args[2])
+		}
+	}
+
+	return out
+}
+
+// disables lists the units disabled, in call order.
+func disables(h *harness) []string {
+	var out []string
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == "systemctl" && len(c.Args) == 3 && c.Args[1] == "disable" {
+			out = append(out, c.Args[2])
+		}
+	}
+
+	return out
+}
+
+// validations counts the runs of repo's own config validation.
+func validations(h *harness, repo string) int {
+	n := 0
+
+	for _, c := range h.runner.Calls() {
+		if c.Name == h.e.Host.Binary(repo) && len(c.Args) > 1 && c.Args[0] == "config" && c.Args[1] == "validate" {
+			n++
+		}
+	}
+
+	return n
+}
+
+// rejectIncomplete makes the validators reject what a host without GitHub
+// and docker leaves behind, as upstream does: the server an empty github
+// block, the worker backends an empty base_image.
+func rejectIncomplete(h *harness) {
+	h.runner.On(h.e.Host.Binary(repos.Server), "config", "validate").Return("", `error: github.auth_mode is required: must be "app" or "pat" (got "")`, 1)
+	h.runner.On(h.e.Host.Binary(repos.Agent), "config", "validate").Return("", "error: base_image is required", 1)
+	h.runner.On(h.e.Host.Binary(repos.Chat), "config", "validate").Return("", "error: base_image is required", 1)
+}
+
 func TestUpdateNothingMovedIsQuiet(t *testing.T) {
 	h := installed(t, true)
 
@@ -304,6 +352,304 @@ func TestUpdateDockerAppeared(t *testing.T) {
 	assert.True(t, st.Docker)
 }
 
+// A server waiting for its github block and backends waiting for docker are
+// held back for those reasons, not reported invalid for the values their
+// validators reject until then.
+func TestUpdateSkipReasonsWinOverValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		architectInvalid bool
+	}{
+		{name: "only skip rows"},
+		{name: "an eligible invalid config is still a problem", architectInvalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, false)
+			rejectIncomplete(h)
+			require.NoError(t, h.e.Install(context.Background(), DefaultAnswers()))
+			h.out.b = nil
+
+			if tc.architectInvalid {
+				h.runner.On(h.e.Host.Binary(repos.Architect), "config", "validate").Return("", "error: contextmatrix_url is required", 1)
+			}
+
+			for repo, head := range map[string]string{
+				repos.Server: "a9999999999", repos.Agent: "b9999999999",
+				repos.Chat: "c9999999999", repos.Architect: "d9999999999",
+			} {
+				h.git.heads[repo] = head
+			}
+
+			err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
+			out := h.out.String()
+
+			for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
+				row := resultRow(t, out, repo)
+				assert.Contains(t, row, "not started", repo)
+				assert.NotContains(t, row, "✗", repo)
+				assert.Zero(t, validations(h, repo), "%s is held back, so it is not validated", repo)
+			}
+
+			assert.NotContains(t, out, "auth_mode is required")
+			assert.NotContains(t, out, "base_image is required")
+
+			if !tc.architectInvalid {
+				require.NoError(t, err, "skip rows are not problems")
+				assert.Equal(t, []string{repos.Architect}, restarts(h))
+
+				return
+			}
+
+			var pe *ProblemsError
+			require.ErrorAs(t, err, &pe)
+			assert.Equal(t, 1, pe.N, "only the architect")
+			assert.Contains(t, resultRow(t, out, repos.Architect), "✗")
+			assert.Contains(t, out, "contextmatrix_url is required")
+			assert.Empty(t, restarts(h))
+		})
+	}
+}
+
+// Once docker is there, the backends held back for it are validated again.
+func TestUpdateValidatesABackendOnceDockerIsThere(t *testing.T) {
+	h := newHarness(t, false)
+	rejectIncomplete(h)
+	require.NoError(t, h.e.Install(context.Background(), DefaultAnswers()))
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+	require.Zero(t, validations(h, repos.Agent))
+
+	h.e.Host.Docker = true
+	h.runner.On(h.e.Host.Binary(repos.Agent), "config", "validate").Return("ok\n", "", 0)
+	h.runner.On(h.e.Host.Binary(repos.Chat), "config", "validate").Return("ok\n", "", 0)
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, 1, validations(h, repos.Agent))
+	assert.Equal(t, 1, validations(h, repos.Chat))
+	assert.Contains(t, restarts(h), repos.Agent)
+	assert.Contains(t, restarts(h), repos.Chat)
+}
+
+// A unit is enabled only once setup starts it: the server held back for its
+// github block is enabled by the update that starts it.
+func TestUpdateEnablesAServiceItStartsForTheFirstTime(t *testing.T) {
+	h := newHarness(t, true)
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	require.NoError(t, h.e.Install(context.Background(), a))
+	require.NotContains(t, starts(h), repos.Server)
+	assert.NotContains(t, enables(h), repos.Server, "a unit setup did not start is not enabled")
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+	configsync.Set(server, "github.auth_mode", "pat")
+	configsync.Set(server, "github.pat.token", "x")
+	data, err := configsync.Encode(server, referenceFor(repos.Server))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(h.e.L.ServerConfig(), data, 0o600))
+
+	n := len(h.runner.Calls())
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Equal(t, []string{repos.Server}, restarts(h))
+
+	var update []string
+
+	for _, c := range h.runner.Calls()[n:] {
+		if c.Name == "systemctl" {
+			update = append(update, strings.Join(c.Args, " "))
+		}
+	}
+
+	assert.Equal(t, []string{"--user enable " + repos.Server, "--user restart " + repos.Server}, update,
+		"only the started unit is enabled, before its restart")
+}
+
+// A unit an older install enabled for a service that cannot run, a server
+// without its github block or a backend that never had docker, would start
+// at every boot with a file its validator rejects; every managed update
+// disables it, whether or not the service needed a restart.
+func TestUpdateDisablesUnitsOfServicesThatCannotRun(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T) *harness
+		want  []string
+	}{
+		{
+			name: "github block missing",
+			setup: func(t *testing.T) *harness {
+				t.Helper()
+
+				h := newHarness(t, true)
+				a := DefaultAnswers()
+				a.AuthMode = "none"
+				require.NoError(t, h.e.Install(context.Background(), a))
+
+				return h
+			},
+			want: []string{repos.Server},
+		},
+		{
+			name: "docker never available",
+			setup: func(t *testing.T) *harness {
+				t.Helper()
+
+				return installed(t, false)
+			},
+			want: []string{repos.Agent, repos.Chat},
+		},
+		{
+			// The file names a built image, so the backend runs once docker
+			// is back; disabling it would keep it down after the next boot.
+			name: "docker down with images built",
+			setup: func(t *testing.T) *harness {
+				t.Helper()
+
+				h := installed(t, true)
+				h.e.Host.Docker = false
+
+				return h
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := tc.setup(t)
+
+			for _, moved := range []bool{false, true} {
+				if moved {
+					for repo, head := range map[string]string{repos.Server: "a9999999999", repos.Agent: "b9999999999", repos.Chat: "c9999999999"} {
+						h.git.heads[repo] = head
+					}
+				}
+
+				m := len(h.runner.Calls())
+
+				require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}), "moved: %v", moved)
+
+				var got []string
+
+				for _, c := range h.runner.Calls()[m:] {
+					if c.Name == "systemctl" && len(c.Args) == 3 && c.Args[1] == "disable" {
+						got = append(got, c.Args[2])
+					}
+				}
+
+				assert.Equal(t, tc.want, got, "moved: %v", moved)
+			}
+		})
+	}
+}
+
+func TestUpdateFailedDisableIsANoteNotAProblem(t *testing.T) {
+	h := newHarness(t, true)
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	require.NoError(t, h.e.Install(context.Background(), a))
+	h.out.b = nil
+	h.runner.On("systemctl", "--user", "disable").Return("", "Failed to disable unit: Access denied", 1)
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	out := h.out.String()
+	assert.Contains(t, out, "Access denied", "the failure is shown")
+	assert.Empty(t, stepLines(out, "✗"))
+}
+
+func TestUpdateUnmanagedDisablesNothing(t *testing.T) {
+	h := newHarness(t, false)
+	a := DefaultAnswers()
+	a.Services = false
+	require.NoError(t, h.e.Install(context.Background(), a))
+
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+	assert.Empty(t, systemctlCalls(h))
+}
+
+// A run that cannot reach the service manager the install recorded, such
+// as an SSH session or cron job without the user manager, stops before it
+// changes anything: going on would build, restart nothing and record the
+// install as unmanaged.
+func TestUpdateStopsWhenTheRecordedManagerIsUnreachable(t *testing.T) {
+	h := installed(t, true)
+	h.git.heads[repos.Agent] = "b9999999999"
+
+	const reason = "systemctl --user is-system-running answered offline"
+
+	h.e.Host.ServiceManager = "none"
+	h.e.Host.ServiceManagerReason = reason
+	h.e.Services = services.New("none", h.runner, h.e.L, 1000)
+
+	before, err := os.ReadFile(h.e.L.StateFile())
+	require.NoError(t, err)
+
+	agent, err := os.ReadFile(h.e.L.AgentConfig())
+	require.NoError(t, err)
+
+	h.git.syncs.Store(0)
+	n := len(h.runner.Calls())
+
+	err = h.e.Update(context.Background(), UpdateOptions{Yes: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), reason, "the error says why the manager is unreachable")
+
+	var pe *ProblemsError
+	assert.NotErrorAs(t, err, &pe, "no run happened to report on")
+
+	assert.Zero(t, h.git.syncs.Load(), "nothing is fetched")
+	assert.Empty(t, h.runner.Calls()[n:], "nothing is built, validated or started")
+	assert.Empty(t, h.images.built)
+
+	after, err := os.ReadFile(h.e.L.StateFile())
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "the state is untouched")
+
+	agentAfter, err := os.ReadFile(h.e.L.AgentConfig())
+	require.NoError(t, err)
+	assert.Equal(t, string(agent), string(agentAfter), "no config is written")
+}
+
+func TestUpdateKeepsTheRecordedManager(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		recorded string
+		detected string
+		managed  bool
+	}{
+		{name: "systemd recorded and reachable", recorded: "systemd", detected: "systemd", managed: true},
+		{name: "none recorded, none detected", recorded: "none", detected: "none"},
+		{name: "none recorded, systemd detected", recorded: "none", detected: "systemd"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var h *harness
+			if tc.recorded == "none" {
+				h = declined(t)
+			} else {
+				h = installed(t, true)
+			}
+
+			h.e.Host.ServiceManager = tc.detected
+			h.e.Services = services.New(tc.detected, h.runner, h.e.L, 1000)
+			h.git.heads[repos.Agent] = "b9999999999"
+
+			require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
+
+			if tc.managed {
+				assert.Equal(t, []string{repos.Agent}, restarts(h))
+			} else {
+				assert.Empty(t, systemctlCalls(h))
+				assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "start by hand")
+			}
+
+			st, _, err := state.Load(h.e.L.StateFile())
+			require.NoError(t, err)
+			assert.Equal(t, tc.recorded, st.ServiceManager)
+			assert.Equal(t, "b9999999999", st.Repos[repos.Agent].Commit)
+		})
+	}
+}
+
 func TestUpdateRequiresInstall(t *testing.T) {
 	h := newHarness(t, true)
 	err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
@@ -459,10 +805,12 @@ func TestUpdateHoldsANewArchitectWhosePortIsTaken(t *testing.T) {
 	preArchitect(t, h, placeholderBlock())
 	h.runner.On("systemctl", "--user", "is-active", repos.Architect).Return("inactive\n", "", 3)
 	h.e.PortFree = func(int) bool { return false }
+	before := len(disables(h))
 
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
 
 	assert.NotContains(t, restarts(h), repos.Architect)
+	assert.Empty(t, disables(h)[before:], "a held architect runs once its port is free")
 
 	st, _, err := state.Load(h.e.L.StateFile())
 	require.NoError(t, err)
@@ -479,8 +827,8 @@ func TestUpdateHoldsANewArchitectWhosePortIsTaken(t *testing.T) {
 	assert.Equal(t, "ddddddd4444", st.Repos[repos.Architect].Commit)
 }
 
-// A held architect's unit stays enabled, so the init system can start it; its
-// own listener must not hold it again.
+// An architect already running, such as one started by hand after it was
+// held, owns the listener on its port, which must not hold it again.
 func TestUpdateDoesNotHoldAnArchitectThatIsAlreadyRunning(t *testing.T) {
 	h := installed(t, true)
 	preArchitect(t, h, placeholderBlock())

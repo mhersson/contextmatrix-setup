@@ -10,15 +10,6 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/run"
 )
 
-const (
-	Server    = "contextmatrix"
-	Agent     = "contextmatrix-agent"
-	Chat      = "contextmatrix-chat"
-	Architect = "contextmatrix-architect"
-)
-
-var All = []string{Server, Agent, Chat, Architect}
-
 type Service struct {
 	Name           string
 	Description    string
@@ -41,6 +32,7 @@ type Manager interface {
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
+	Disable(ctx context.Context, name string) error
 	Active(ctx context.Context, name string) (bool, error)
 	Remove(ctx context.Context, name string) error
 	Logs(ctx context.Context, name string, lines int) (string, error)

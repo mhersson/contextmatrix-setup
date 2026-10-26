@@ -37,7 +37,7 @@ first install is a single sitting. Every item also has a flag, see
 
 | Item                                       | Where to get it                                                                                                                                                                                                                                                                       |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OpenRouter API key**                     | <https://openrouter.ai/keys>. Every run and chat goes through OpenRouter; the server forwards the key to the workers. Leave it empty to add it to `server.yaml` later, but nothing runs until then.                                                                                   |
+| **OpenRouter API key**                     | <https://openrouter.ai/keys>. Every run and chat goes through OpenRouter. The server passes the key to the agent and chat services, which keep it and give each worker only a per-run proxy token. Leave it empty to add it to `server.yaml` later, but nothing runs until then.      |
 | **Default model**                          | An OpenRouter model slug. The default is `deepseek/deepseek-v4-flash`. The agent and chat use it; chat cannot start without one. The architect has its own default, `anthropic/claude-sonnet-5.5`; `--architect-model` changes it.                                                    |
 | **GitHub credential**                      | A GitHub App or a personal access token, see below. Without one the server does not start.                                                                                                                                                                                            |
 | **Artificial Analysis API key** (optional) | Create an account at <https://artificialanalysis.ai> (free tier) and generate a key on your account page. Gives the model selector live quality scores.                                                                                                                               |
@@ -124,7 +124,21 @@ image it runs.
 
 `update` exits 1 when a row of the result table has a problem: an image that
 did not build, an invalid config for a service that needed a restart, a failed
-restart, or an unhealthy service.
+restart, or an unhealthy service. A service held back because `server.yaml` has
+no github block or docker is missing shows as not started, which is not a
+problem.
+
+When the install manages its services with systemd and the run cannot reach
+the systemd user manager, as from an SSH session or a cron job without one,
+`update` stops before it fetches anything and exits 1 with an error that names
+the cause. Rerun it where the user manager is reachable. With launchd the same
+happens only when `launchctl` is missing.
+
+An install recorded as unmanaged (`service_manager: none` in
+`~/.contextmatrix/setup/state.yaml`) stays unmanaged: only a first `install`
+records the manager, and `install` on an installed system runs `update`. To
+manage its services again, set `service_manager: systemd` (or `launchd`) in
+that file and run `update`.
 
 With `NO_COLOR` set, `TERM=dumb`, or output that is not a terminal (a pipe, a
 log), `update` prints plain text with the same layout, no colours and no escape
@@ -166,11 +180,18 @@ The architect's state (`architect.db`, code checkouts, exports) lives in
 
 Units are installer-owned. On Linux, customise with
 `systemctl --user edit <name>`; the installer never touches drop-ins. On macOS
-edit the config file, not the plist. launchd loads every plist in
-`~/Library/LaunchAgents` at login, so a service the installer did not start
-(GitHub skipped, invalid config, no docker, architect port taken) still starts
-at the next login until the cause is fixed and `contextmatrix-setup update` is
-run.
+edit the config file, not the plist. A unit is enabled when the installer
+starts it, not when it writes it, so a service it holds back (GitHub skipped,
+invalid config, no docker, architect port taken) does not start at boot or
+login either; the `update` that starts it enables it. A service that cannot
+run yet, a server without its github block or a backend with no docker and no
+worker image, has its unit disabled by every `install` and `update`, even one
+enabled before; on macOS its label is also unloaded. Setup reads the github
+block from `server.yaml` only, so a block given through the environment, such
+as in a `systemctl --user edit` drop-in, counts as missing: that server is not
+started and its unit is disabled. On macOS a new plist is disabled with
+`launchctl disable` until it is started, since launchd loads every plist in
+`~/Library/LaunchAgents` at login.
 
 ## Worker images
 
@@ -199,7 +220,9 @@ only for some keys.
 The schema comes from each app's own `config defaults` command, so a fresh
 upstream key appears at the next update and a removed one is dropped and listed
 in the output. A value that fails the app's validation is reported with the key
-path and that service is not restarted; fix it and rerun.
+path and that service is not restarted; fix it and rerun. A service held back
+for a missing github block or missing docker is validated once that is fixed,
+since its file lacks those values until then.
 
 ## Development
 
@@ -232,3 +255,9 @@ Run after changes to services or images; CI covers Linux only.
    the four labels and the configs remain.
 6. Confirm `~/Library/Logs/contextmatrix/contextmatrix-architect.log` shows the
    architect listening, and that `contextmatrix-setup status` lists `rg`.
+7. Install with `--github-mode skip`; confirm
+   `launchctl print-disabled gui/$UID` lists
+   `com.github.mhersson.contextmatrix` as disabled. Fill in the github block,
+   run `contextmatrix-setup update`, and confirm it is listed as enabled and
+   `launchctl print gui/$UID/com.github.mhersson.contextmatrix` shows it
+   running.

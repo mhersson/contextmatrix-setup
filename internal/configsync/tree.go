@@ -86,28 +86,3 @@ func Set(t Tree, path string, v any) {
 
 	cur[parts[len(parts)-1]] = v
 }
-
-func Clone(t Tree) Tree {
-	return cloneValue(t).(map[string]any)
-}
-
-func cloneValue(v any) any {
-	switch x := v.(type) {
-	case map[string]any:
-		out := make(Tree, len(x))
-		for k, val := range x {
-			out[k] = cloneValue(val)
-		}
-
-		return out
-	case []any:
-		out := make([]any, len(x))
-		for i, val := range x {
-			out[i] = cloneValue(val)
-		}
-
-		return out
-	default:
-		return v
-	}
-}

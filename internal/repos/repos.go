@@ -26,6 +26,17 @@ const (
 // schema must exist before the backends are configured against it.
 var Apps = []string{Server, Agent, Chat, Architect}
 
+// NameWidth is the width of a column of app names: the longest one.
+func NameWidth() int {
+	w := 0
+
+	for _, name := range Apps {
+		w = max(w, len(name))
+	}
+
+	return w
+}
+
 func URL(name string) string {
 	return "https://github.com/mhersson/" + name + ".git"
 }
@@ -36,7 +47,7 @@ type Git struct {
 
 func (g Git) Sync(ctx context.Context, dir, url string, out io.Writer) (string, error) {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil { //nolint:gosec // G301: the source cache holds public clones, no secret
 			return "", err
 		}
 

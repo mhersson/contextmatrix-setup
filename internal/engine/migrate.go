@@ -40,7 +40,7 @@ func (e *Engine) Migrate(ctx context.Context, p migrate.Plan) error {
 			return err
 		}
 
-		e.logf("%-22s removed %s", "migrate", path)
+		e.logf("%-*s removed %s", repos.NameWidth(), "migrate", path)
 	}
 
 	for _, src := range p.Sources {
@@ -64,7 +64,7 @@ func (e *Engine) Migrate(ctx context.Context, p migrate.Plan) error {
 		st.Migration = &state.Migration{DoneAt: e.now(), From: p.Sources}
 	}
 
-	e.logf("%-22s %d sources moved under %s", "migrate", len(p.Sources), e.L.StateDir)
+	e.logf("%-*s %d sources moved under %s", repos.NameWidth(), "migrate", len(p.Sources), e.L.StateDir)
 
 	return st.Save(e.L.StateFile())
 }

@@ -37,17 +37,13 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			mode := ui.Mode{Plain: true, Width: 100}
-			out := e.Out
-
-			if cmd.OutOrStdout() == io.Writer(os.Stdout) {
-				mode = ui.Detect(os.Stdout, os.Getenv)
-				if !mode.Plain {
-					out = styledOut(os.Stdout, os.Environ())
-				}
+			// Before the self-update too, which fetches, builds and records
+			// the installer's own repo.
+			if err := e.CheckServiceManager(); err != nil {
+				return err
 			}
 
-			c, closeConsole, err := newUpdateConsole(out, mode, e.L, os.Getenv, time.Now())
+			c, closeConsole, err := openUpdateConsole(cmd, e)
 			if err != nil {
 				return err
 			}
@@ -79,6 +75,22 @@ func newUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noSelf, "no-self-update", false, "skip rebuilding contextmatrix-setup itself")
 
 	return cmd
+}
+
+// openUpdateConsole builds the console an update renders on, for the
+// command's own output.
+func openUpdateConsole(cmd *cobra.Command, e *engine.Engine) (*ui.Console, func(), error) {
+	mode := ui.Mode{Plain: true, Width: 100}
+	out := e.Out
+
+	if cmd.OutOrStdout() == io.Writer(os.Stdout) {
+		mode = ui.Detect(os.Stdout, os.Getenv)
+		if !mode.Plain {
+			out = styledOut(os.Stdout, os.Environ())
+		}
+	}
+
+	return newUpdateConsole(out, mode, e.L, os.Getenv, time.Now())
 }
 
 // styledOut downsamples the 24-bit colour lipgloss renders to the

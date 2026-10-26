@@ -93,7 +93,7 @@ func (f *Fake) Stream(ctx context.Context, c Cmd, out io.Writer) error {
 	_, _ = io.WriteString(out, res.Stdout+res.Stderr)
 
 	if res.ExitCode != 0 {
-		return &ExitError{Cmd: c, Code: res.ExitCode, Tail: res.Stderr}
+		return &ExitError{Cmd: c, Code: res.ExitCode}
 	}
 
 	return nil

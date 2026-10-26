@@ -21,6 +21,8 @@ func (none) Stop(context.Context, string) error { return nil }
 
 func (none) Restart(context.Context, string) error { return nil }
 
+func (none) Disable(context.Context, string) error { return nil }
+
 func (none) Active(context.Context, string) (bool, error) { return false, nil }
 
 func (none) Remove(context.Context, string) error { return nil }

@@ -168,6 +168,65 @@ func TestInstallWithoutDocker(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(e.stubLog(), "systemctl --user start "), "the server and the architect start; the worker backends need docker")
 }
 
+// A run without the user manager the install recorded, as from cron or an
+// SSH session, stops before the installer's own repo or any app is fetched
+// and says why.
+func TestUpdateStopsWithoutTheRecordedManager(t *testing.T) {
+	e := newEnv(t)
+
+	out, err := e.run("install", "--yes", "--auth-mode", "none", "--github-mode", "pat", "--github-pat", "t")
+	require.NoError(t, err, out)
+
+	e.writeStub("systemctl", `#!/bin/sh
+echo "systemctl $*" >> "$STUB_LOG"
+[ "$2" = "is-system-running" ] && { echo offline; exit 1; }
+exit 0
+`)
+	e.commit("contextmatrix-agent", "x.go", "package x\n")
+
+	before := e.read(".contextmatrix/setup/state.yaml")
+
+	require.NoError(t, os.Remove(e.log))
+
+	// The self-update runs unless the re-exec marker is set.
+	out, err = e.runWith([]string{"CONTEXTMATRIX_SETUP_REEXEC="}, "update", "--yes")
+
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit, out)
+	assert.Equal(t, 1, exit.ExitCode())
+	assert.Contains(t, out, "answered offline", "the error carries the detected reason")
+	assert.Equal(t, before, e.read(".contextmatrix/setup/state.yaml"))
+	assert.NotContains(t, e.stubLog(), "make ")
+	assert.NoDirExists(t, filepath.Join(e.home, ".cache", "contextmatrix-setup", "src", "contextmatrix-setup"), "the installer's own repo is not fetched")
+}
+
+// install on an installed system runs an update, which asks before it
+// applies the way update does: only a yes applies.
+func TestInstallOnAnInstalledSystemAsksLikeUpdate(t *testing.T) {
+	e := newEnv(t)
+
+	// Without GitHub the server is not started, so applying the update
+	// rebuilds it without a restart to probe.
+	out, err := e.run("install", "--yes", "--auth-mode", "none", "--github-mode", "skip")
+	require.NoError(t, err, out)
+
+	e.commit("contextmatrix", "x.go", "package x\n")
+
+	for _, tc := range []struct {
+		answer  string
+		applies bool
+	}{
+		{answer: "no thanks\n", applies: false},
+		{answer: "yes\n", applies: true},
+	} {
+		require.NoError(t, os.Remove(e.log))
+
+		out, err := e.runInput(tc.answer, "install")
+		require.NoError(t, err, out)
+		assert.Equal(t, tc.applies, strings.Contains(e.stubLog(), "make install contextmatrix\n"), "answer %q: %s", tc.answer, out)
+	}
+}
+
 func TestMigrateFromOldLayout(t *testing.T) {
 	e := newEnv(t)
 

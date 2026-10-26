@@ -35,13 +35,14 @@ func Wait(ctx context.Context, follow func(ctx context.Context, w io.Writer) err
 	defer cancel()
 
 	pr, pw := io.Pipe()
-	done := make(chan error, 1)
+	// The follower's error ends the pipe and so the scan; done only says it
+	// has returned.
+	done := make(chan struct{})
 
 	go func() {
-		err := follow(ctx, pw)
+		defer close(done)
 
-		_ = pw.CloseWithError(err)
-		done <- err
+		_ = pw.CloseWithError(follow(ctx, pw))
 	}()
 
 	found := make(chan string, 1)

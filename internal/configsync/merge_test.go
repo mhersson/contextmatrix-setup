@@ -136,7 +136,7 @@ boards:
 	assert.Equal(t, "boards[0].stale", dropped[0].Path)
 }
 
-func TestGetSetClone(t *testing.T) {
+func TestGetSet(t *testing.T) {
 	tr := Tree{}
 	Set(tr, "backends.agent.url", "http://x")
 
@@ -146,12 +146,6 @@ func TestGetSetClone(t *testing.T) {
 
 	_, ok = Get(tr, "backends.chat.url")
 	assert.False(t, ok)
-
-	c := Clone(tr)
-	Set(c, "backends.agent.url", "http://y")
-
-	v, _ = Get(tr, "backends.agent.url")
-	assert.Equal(t, "http://x", v, "clone is deep")
 }
 
 func TestParseEmptyAndLoadMissing(t *testing.T) {

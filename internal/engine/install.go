@@ -16,7 +16,6 @@ import (
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
 	"github.com/mhersson/contextmatrix-setup/internal/run"
-	"github.com/mhersson/contextmatrix-setup/internal/services"
 	"github.com/mhersson/contextmatrix-setup/internal/state"
 )
 
@@ -59,11 +58,11 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		}
 
 		heads[name] = head[name]
-		e.logf("%-22s %s", name, repos.Short(head[name]))
+		e.logf("%-*s %s", repos.NameWidth(), name, repos.Short(head[name]))
 	}
 
 	for _, repo := range repos.Apps {
-		say := func(cmd string) { e.logf("%-22s %s", repo, cmd) }
+		say := func(cmd string) { e.logf("%-*s %s", repos.NameWidth(), repo, cmd) }
 		if err := e.buildBinary(ctx, repo, e.Out, say); err != nil {
 			return err
 		}
@@ -134,13 +133,13 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 		}
 
 		for _, d := range res.Dropped {
-			e.logf("%-22s %s", filepath.Base(res.Path), droppedText(d))
+			e.logf("%-*s %s", repos.NameWidth(), filepath.Base(res.Path), droppedText(d))
 		}
 
 		results[repo] = res
 		st.Configs[filepath.Base(res.Path)] = state.ConfigHash{SHA256: res.Hash}
 
-		e.logf("%-22s written", filepath.Base(res.Path))
+		e.logf("%-*s written", repos.NameWidth(), filepath.Base(res.Path))
 	}
 
 	files, _, err := e.copyWorkflowSkills(nil)
@@ -150,24 +149,24 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 
 	st.WorkflowSkills = state.WorkflowSkills{Commit: heads[repos.Server], Files: files}
 
-	invalid := e.validateAll(ctx, results)
+	// Read GitHub readiness from the merged file, not the answers: after a
+	// migration the block is carried over while the answers say "skip".
+	github := githubConfigured(results[repos.Server].Tree)
+
+	invalid := e.validateAll(ctx, results, github)
 	valid := map[string]bool{}
 
 	for _, repo := range repos.Apps {
 		valid[repo] = invalid[repo] == nil
 
 		if err := invalid[repo]; err != nil {
-			e.logf("%-22s invalid: %v", filepath.Base(results[repo].Path), err)
+			e.logf("%-*s invalid: %v", repos.NameWidth(), filepath.Base(results[repo].Path), err)
 		}
 	}
 
 	for _, w := range configsync.CrossCheck(results[repos.Server].Tree, results[repos.Agent].Tree, results[repos.Chat].Tree, results[repos.Architect].Tree) {
 		e.logf("warning: %s", w)
 	}
-
-	// Read GitHub readiness from the merged file, not the answers: after a
-	// migration the block is carried over while the answers say "skip".
-	github := githubConfigured(results[repos.Server].Tree)
 
 	// The server logs the admin link once, at startup, so the log must be
 	// followed before the server is started or the line is missed.
@@ -184,6 +183,10 @@ func (e *Engine) Install(ctx context.Context, a Answers) error {
 	if a.Services {
 		if err := e.installUnits(ctx, mergedTrees(results)); err != nil {
 			return err
+		}
+
+		for _, n := range e.disableHeldBack(ctx, github, st.Images) {
+			e.logf("%-*s %s", repos.NameWidth(), n.name, n.text)
 		}
 
 		if a.Linger && e.Host.OS == "linux" {
@@ -428,13 +431,19 @@ func samePath(a, b string) (bool, error) {
 	return ra == rb, nil
 }
 
-// validateAll runs each app's own validation, nil meaning valid. A failure
-// never touches the file; the user fixes the value and reruns.
-func (e *Engine) validateAll(ctx context.Context, results map[string]configResult) map[string]error {
+// validateAll runs each app's own validation, nil meaning valid, except for
+// a repo with a skip reason, which the first run after the reason is gone
+// validates. A failure never touches the file; the user fixes the value and
+// reruns.
+func (e *Engine) validateAll(ctx context.Context, results map[string]configResult, github bool) map[string]error {
 	errs := map[string]error{}
 
 	for _, repo := range repos.Apps {
-		errs[repo] = configsync.Validate(ctx, e.R, e.Host.Binary(binaryFor(repo)), results[repo].Path)
+		if e.skipReason(repo, github) != "" {
+			continue
+		}
+
+		errs[repo] = configsync.Validate(ctx, e.R, e.Host.Binary(repo), results[repo].Path)
 	}
 
 	return errs
@@ -448,7 +457,7 @@ func (e *Engine) installUnits(ctx context.Context, trees Trees) error {
 		}
 
 		if changed {
-			e.logf("%-22s unit written", repo)
+			e.logf("%-*s unit written", repos.NameWidth(), repo)
 		}
 	}
 
@@ -462,28 +471,25 @@ func (e *Engine) enableLinger(ctx context.Context) {
 	}
 }
 
-// startEligible starts what can run and reports what it started: the
-// server only with GitHub configured and a valid file, the worker backends
-// only with docker and a valid file, the architect with a valid file. A
-// repo in hold is not started, for the reason given.
+// startEligible starts what can run and reports what it started: a repo
+// with no skip reason and a valid file. A repo in hold is not started, for
+// the reason given.
 func (e *Engine) startEligible(ctx context.Context, github bool, valid map[string]bool, hold map[string]string) map[string]bool {
 	started := map[string]bool{}
 
 	for _, repo := range repos.Apps {
-		switch {
+		switch skip := e.skipReason(repo, github); {
+		case skip != "":
+			e.logf("%-*s not started: %s", repos.NameWidth(), repo, skip)
 		case !valid[repo]:
-			e.logf("%-22s not started: config invalid", repo)
-		case repo == repos.Server && !github:
-			e.logf("%-22s not started: fill in the github block of server.yaml, then run update", repo)
-		case needsDocker(repo) && !e.Host.Docker:
-			e.logf("%-22s not started: docker not available", repo)
+			e.logf("%-*s not started: config invalid", repos.NameWidth(), repo)
 		case hold[repo] != "":
-			e.logf("%-22s not started: %s", repo, hold[repo])
+			e.logf("%-*s not started: %s", repos.NameWidth(), repo, hold[repo])
 		default:
 			if err := e.Services.Start(ctx, repo); err != nil {
-				e.logf("%-22s start failed: %v", repo, err)
+				e.logf("%-*s start failed: %v", repos.NameWidth(), repo, err)
 			} else {
-				e.logf("%-22s started", repo)
+				e.logf("%-*s started", repos.NameWidth(), repo)
 
 				started[repo] = true
 			}
@@ -527,7 +533,7 @@ func (e *Engine) followLink(ctx context.Context) *linkWatch {
 		defer close(w.done)
 
 		w.path, w.err = bootstrap.Wait(ctx, func(ctx context.Context, out io.Writer) error {
-			return e.Services.Follow(ctx, services.Server, out)
+			return e.Services.Follow(ctx, repos.Server, out)
 		}, bootstrapWait)
 	}()
 
@@ -581,10 +587,10 @@ func (e *Engine) announce(ctx context.Context, a Answers, serverStarted bool, wa
 
 func (e *Engine) linkCommand() string {
 	if e.Host.OS == "darwin" {
-		log := layout.Tilde(e.L, filepath.Join(e.L.MacLogsDir(), services.Server+".log"))
+		log := layout.Tilde(e.L, filepath.Join(e.L.MacLogsDir(), repos.Server+".log"))
 
 		return "grep 'bootstrap link' " + log
 	}
 
-	return "journalctl --user -u " + services.Server + " -n 50 | grep 'bootstrap link'"
+	return "journalctl --user -u " + repos.Server + " -n 50 | grep 'bootstrap link'"
 }

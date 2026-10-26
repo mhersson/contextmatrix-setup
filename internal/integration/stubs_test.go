@@ -200,6 +200,22 @@ func (e *env) run(args ...string) (string, error) {
 
 // runWith appends extra KEY=VALUE entries, which win over the defaults.
 func (e *env) runWith(extra []string, args ...string) (string, error) {
+	out, err := e.command(extra, args...).CombinedOutput()
+
+	return string(out), err
+}
+
+// runInput gives the binary input on its stdin.
+func (e *env) runInput(input string, args ...string) (string, error) {
+	cmd := e.command(nil, args...)
+	cmd.Stdin = strings.NewReader(input)
+
+	out, err := cmd.CombinedOutput()
+
+	return string(out), err
+}
+
+func (e *env) command(extra []string, args ...string) *exec.Cmd {
 	// The binary under test is built by this test into its own temp dir.
 	cmd := exec.Command(e.setup, args...) //nolint:gosec
 	cmd.Env = []string{
@@ -217,9 +233,7 @@ func (e *env) runWith(extra []string, args ...string) (string, error) {
 	}
 	cmd.Env = append(cmd.Env, extra...)
 
-	out, err := cmd.CombinedOutput()
-
-	return string(out), err
+	return cmd
 }
 
 func (e *env) stubLog() string {

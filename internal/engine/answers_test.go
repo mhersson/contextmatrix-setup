@@ -20,7 +20,6 @@ func TestDefaultAnswers(t *testing.T) {
 	assert.Equal(t, "boards", a.BoardsName)
 	assert.True(t, a.Services)
 	require.NoError(t, a.Validate())
-	assert.False(t, a.GitHubConfigured())
 }
 
 func TestRepoName(t *testing.T) {
@@ -83,7 +82,6 @@ func TestValidateRejectsBadInput(t *testing.T) {
 	a.GitHubMode = "pat"
 	a.GitHubPAT = "ghp_x"
 	require.NoError(t, a.Validate())
-	assert.True(t, a.GitHubConfigured())
 }
 
 func TestKeysAndInstanceID(t *testing.T) {
