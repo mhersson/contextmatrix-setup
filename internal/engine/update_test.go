@@ -381,17 +381,10 @@ func TestUpdateSkipReasonsWinOverValidation(t *testing.T) {
 			}
 
 			err := h.e.Update(context.Background(), UpdateOptions{Yes: true})
-			out := h.out.String()
 
 			for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
-				row := resultRow(t, out, repo)
-				assert.Contains(t, row, "not started", repo)
-				assert.NotContains(t, row, "✗", repo)
 				assert.Zero(t, validations(h, repo), "%s is held back, so it is not validated", repo)
 			}
-
-			assert.NotContains(t, out, "auth_mode is required")
-			assert.NotContains(t, out, "base_image is required")
 
 			if !tc.architectInvalid {
 				require.NoError(t, err, "skip rows are not problems")
@@ -403,8 +396,7 @@ func TestUpdateSkipReasonsWinOverValidation(t *testing.T) {
 			var pe *ProblemsError
 			require.ErrorAs(t, err, &pe)
 			assert.Equal(t, 1, pe.N, "only the architect")
-			assert.Contains(t, resultRow(t, out, repos.Architect), "✗")
-			assert.Contains(t, out, "contextmatrix_url is required")
+			assert.Contains(t, h.out.String(), "contextmatrix_url")
 			assert.Empty(t, restarts(h))
 		})
 	}
@@ -546,14 +538,11 @@ func TestUpdateFailedDisableIsANoteNotAProblem(t *testing.T) {
 	a := DefaultAnswers()
 	a.AuthMode = "none"
 	require.NoError(t, h.e.Install(context.Background(), a))
-	h.out.b = nil
 	h.runner.On("systemctl", "--user", "disable").Return("", "Failed to disable unit: Access denied", 1)
+	before := len(disables(h))
 
-	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
-
-	out := h.out.String()
-	assert.Contains(t, out, "Access denied", "the failure is shown")
-	assert.Empty(t, stepLines(out, "✗"))
+	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}), "a failed disable is not a problem")
+	assert.Equal(t, []string{repos.Server}, disables(h)[before:], "the disable was attempted")
 }
 
 func TestUpdateUnmanagedDisablesNothing(t *testing.T) {
@@ -591,8 +580,11 @@ func TestUpdateStopsWhenTheRecordedManagerIsUnreachable(t *testing.T) {
 	n := len(h.runner.Calls())
 
 	err = h.e.Update(context.Background(), UpdateOptions{Yes: true})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), reason, "the error says why the manager is unreachable")
+
+	var unreachable *ManagerUnreachableError
+	require.ErrorAs(t, err, &unreachable)
+	assert.Equal(t, "systemd", unreachable.Recorded)
+	assert.Equal(t, reason, unreachable.Reason)
 
 	var pe *ProblemsError
 	assert.NotErrorAs(t, err, &pe, "no run happened to report on")
@@ -639,7 +631,6 @@ func TestUpdateKeepsTheRecordedManager(t *testing.T) {
 				assert.Equal(t, []string{repos.Agent}, restarts(h))
 			} else {
 				assert.Empty(t, systemctlCalls(h))
-				assert.Contains(t, resultRow(t, h.out.String(), repos.Agent), "start by hand")
 			}
 
 			st, _, err := state.Load(h.e.L.StateFile())

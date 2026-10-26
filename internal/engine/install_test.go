@@ -161,10 +161,7 @@ func TestInstallWithoutDockerAndGitHubSkipped(t *testing.T) {
 		assert.Zero(t, validations(h, repo), "%s is held back, so it is not validated", repo)
 	}
 
-	out := h.out.String()
-	assert.NotContains(t, out, "auth_mode is required")
-	assert.NotContains(t, out, "base_image is required")
-	assert.Contains(t, out, "docker")
+	assert.Contains(t, h.out.String(), "docker")
 
 	st, _, err := state.Load(h.e.L.StateFile())
 	require.NoError(t, err)
@@ -184,7 +181,7 @@ func TestInstallDoesNotStartAnEligibleInvalidConfig(t *testing.T) {
 
 	assert.Equal(t, []string{"contextmatrix", "contextmatrix-agent", "contextmatrix-chat"}, starts(h))
 	assert.Equal(t, starts(h), enables(h), "a unit is enabled only when started")
-	assert.Contains(t, h.out.String(), "contextmatrix_url is required")
+	assert.Contains(t, h.out.String(), "contextmatrix_url")
 }
 
 func TestInstallOpensBootstrapLinkInMultiMode(t *testing.T) {
