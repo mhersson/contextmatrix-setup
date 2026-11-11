@@ -105,6 +105,10 @@ func (e *Engine) PrintStatus(s Status) {
 
 	if e.Host.Search.RG != "" {
 		e.logf("rg: %s", e.Host.Search.RG)
+
+		for _, line := range claudeNotice(e.Host, e.claudeTokenSet()) {
+			e.logf("%s", line)
+		}
 	} else {
 		e.printSearchNotice()
 	}

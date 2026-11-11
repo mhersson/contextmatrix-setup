@@ -154,3 +154,13 @@ func TestRenderEscapesPlistText(t *testing.T) {
 func TestLabel(t *testing.T) {
 	assert.Equal(t, "com.github.mhersson.contextmatrix", Label(repos.Server))
 }
+
+func TestRender_ArchitectMemoryMax(t *testing.T) {
+	s := agentService()
+	assert.Contains(t, string(RenderSystemd(s)), "\nMemoryMax=2G\n", "an empty limit keeps the shared default")
+
+	s.MemoryMax = "4096M"
+	unit := string(RenderSystemd(s))
+	assert.Contains(t, unit, "\nMemoryMax=4096M\n")
+	assert.NotContains(t, unit, "MemoryMax=2G")
+}

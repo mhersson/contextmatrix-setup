@@ -74,3 +74,16 @@ func TestDetectProbesTheServicePath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(gobin, "rg"), info.Search.RG, "GOBIN leads the service PATH")
 }
+
+func TestProbeClaude(t *testing.T) {
+	shell := func(name string) (string, bool) { return "/home/u/.local/bin/" + name, name == "claude" }
+
+	assert.Equal(t, ClaudeBinary{OnServicePath: "/usr/local/bin/claude"},
+		ProbeClaude("/g:/usr/local/bin:/usr/bin", execIn("/usr/local/bin/claude"), shell),
+		"a claude the service finds needs no PATH change")
+
+	assert.Equal(t, ClaudeBinary{ShellPath: "/home/u/.local/bin/claude"},
+		ProbeClaude("/g:/usr/local/bin:/usr/bin", execIn(), shell))
+
+	assert.Equal(t, ClaudeBinary{}, ProbeClaude("/g:/usr/bin", execIn(), noShell))
+}

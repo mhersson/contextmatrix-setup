@@ -7,8 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/configsync"
+	"github.com/mhersson/contextmatrix-setup/internal/host"
 	"github.com/mhersson/contextmatrix-setup/internal/layout"
 	"github.com/mhersson/contextmatrix-setup/internal/repos"
+	"github.com/mhersson/contextmatrix-setup/internal/services"
 )
 
 func pathsEngine() *Engine {
@@ -118,5 +120,54 @@ func TestArchitectPathsListsOnlyAnAbsoluteDirOutsideStateDir(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, c.want, pathsEngine().architectPaths(configsync.Tree{"state_dir": c.dir}))
 		})
+	}
+}
+
+func TestServiceFor_ArchitectClaudePath(t *testing.T) {
+	h := newHarness(t, true)
+	path := h.e.Host.ServicePath()
+
+	h.e.Host.Claude = host.ClaudeBinary{ShellPath: "/home/u/.local/bin/claude"}
+	assert.Equal(t, path+":/home/u/.local/bin", h.e.serviceFor(repos.Architect, Trees{}).Env["PATH"])
+
+	for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
+		assert.Equal(t, path, h.e.serviceFor(repo, Trees{}).Env["PATH"], repo)
+	}
+
+	h.e.Host.Claude = host.ClaudeBinary{OnServicePath: "/usr/local/bin/claude"}
+	assert.Equal(t, path, h.e.serviceFor(repos.Architect, Trees{}).Env["PATH"], "a claude on the service PATH needs nothing appended")
+}
+
+func TestArchitectMemoryMax(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tree configsync.Tree
+		want string
+	}{
+		{"key absent", configsync.Tree{}, "4096M"},
+		{"six runs", configsync.Tree{"claude_code_max_runs": 6}, "5120M"},
+		{"zero", configsync.Tree{"claude_code_max_runs": 0}, "4096M"},
+		{"negative", configsync.Tree{"claude_code_max_runs": -1}, "4096M"},
+		{"not a number", configsync.Tree{"claude_code_max_runs": "four"}, "4096M"},
+		{"parsed from yaml", parseTree(t, "claude_code_max_runs: 2\n"), "3072M"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, architectMemoryMax(tc.tree))
+		})
+	}
+}
+
+func TestRender_ArchitectUnitMemoryAndSandbox(t *testing.T) {
+	h := newHarness(t, true)
+	trees := Trees{Architect: parseTree(t, "claude_code_max_runs: 6\n")}
+
+	architect := string(services.RenderSystemd(h.e.serviceFor(repos.Architect, trees)))
+	assert.Contains(t, architect, "\nMemoryMax=5120M\n")
+	assert.Contains(t, architect, "\nMemoryDenyWriteExecute=yes\n", "claude runs without a JIT, so the sandbox stays")
+	assert.Contains(t, architect, "\nPrivateTmp=yes\n", "a private /tmp is one writable place for a per-run HOME")
+	assert.Contains(t, architect, "ReadWritePaths=-"+h.e.L.StateDir, "the state dir is the other")
+
+	for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
+		assert.Contains(t, string(services.RenderSystemd(h.e.serviceFor(repo, trees))), "\nMemoryMax=2G\n", repo)
 	}
 }

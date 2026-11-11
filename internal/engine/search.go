@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/mhersson/contextmatrix-setup/internal/configsync"
 	"github.com/mhersson/contextmatrix-setup/internal/host"
 	"github.com/mhersson/contextmatrix-setup/internal/ui"
 )
@@ -42,13 +43,39 @@ func rgInstallHint(goos string) string {
 }
 
 func (e *Engine) printSearchNotice() {
-	for _, line := range searchNotice(e.Host) {
+	for _, line := range e.hostNotices() {
 		e.logf("%s", line)
 	}
 }
 
 func (e *Engine) showSearchNotice(c *ui.Console) {
-	for _, line := range searchNotice(e.Host) {
+	for _, line := range e.hostNotices() {
 		c.Println(c.Theme().Caution(line))
 	}
+}
+
+func (e *Engine) hostNotices() []string {
+	return append(searchNotice(e.Host), claudeNotice(e.Host, e.claudeTokenSet())...)
+}
+
+// claudeNotice is the warning block for a host with a Claude Code token but
+// no claude binary: blueprints cannot run on the subscription until it is
+// installed. The installer never installs it, and the architect still runs.
+func claudeNotice(info host.Info, tokenSet bool) []string {
+	if !tokenSet || info.Claude.OnServicePath != "" || info.Claude.ShellPath != "" {
+		return nil
+	}
+
+	return []string{
+		"!!! claude (Claude Code) is not installed: blueprints cannot run on the Claude Code subscription until it is",
+		"!!! the architect still runs; after installing claude, run contextmatrix-setup update so its unit can find it",
+	}
+}
+
+// claudeTokenSet reports whether server.yaml holds a Claude Code token.
+func (e *Engine) claudeTokenSet() bool {
+	v, _ := configsync.Get(e.loadTrees().Server, claudeCodeTokenKey)
+	s, _ := v.(string)
+
+	return s != ""
 }

@@ -19,6 +19,7 @@ type Service struct {
 	WorkingDir     string
 	ReadWritePaths []string
 	LogFile        string
+	MemoryMax      string
 }
 
 func Label(name string) string {

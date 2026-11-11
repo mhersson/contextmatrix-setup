@@ -68,3 +68,23 @@ func isExecutable(p string) bool {
 
 	return err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0
 }
+
+// ClaudeBinary is where Claude Code's claude binary is: on the service PATH,
+// or only on the installer's own PATH (the native installer's ~/.local/bin).
+type ClaudeBinary struct {
+	OnServicePath string
+	ShellPath     string
+}
+
+// ProbeClaude resolves claude the way ProbeSearchTools resolves rg.
+func ProbeClaude(servicePath string, isExec func(string) bool, lookPath func(string) (string, bool)) ClaudeBinary {
+	if p := findOn(servicePath, "claude", isExec); p != "" {
+		return ClaudeBinary{OnServicePath: p}
+	}
+
+	if p, ok := lookPath("claude"); ok {
+		return ClaudeBinary{ShellPath: p}
+	}
+
+	return ClaudeBinary{}
+}

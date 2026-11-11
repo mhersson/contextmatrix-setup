@@ -257,6 +257,13 @@ func (e *Engine) serviceFor(repo string, t Trees) services.Service {
 		s.Description = "ContextMatrix Architect (blueprint backend)"
 		s.Args = []string{"serve", "--config", e.L.ArchitectConfig()}
 		s.ReadWritePaths = append(s.ReadWritePaths, e.architectPaths(t.Architect)...)
+		s.MemoryMax = architectMemoryMax(t.Architect)
+
+		// The unit PATH is fixed, so a claude only the installer's shell
+		// finds (the native installer's ~/.local/bin) gets its directory.
+		if c := e.Host.Claude; c.OnServicePath == "" && c.ShellPath != "" {
+			env["PATH"] += ":" + filepath.Dir(c.ShellPath)
+		}
 	}
 
 	return s
@@ -425,4 +432,21 @@ func (e *Engine) currentKeys(t Trees) Keys {
 	}
 
 	return k
+}
+
+// defaultArchitectClaudeMaxRuns mirrors the architect's own default for
+// claude_code_max_runs, its cap on concurrent claude processes.
+const defaultArchitectClaudeMaxRuns = 4
+
+// architectMemoryMax sizes the architect unit for its claude processes:
+// 2G for the service plus 512M per concurrent run.
+func architectMemoryMax(architect configsync.Tree) string {
+	runs := defaultArchitectClaudeMaxRuns
+
+	v, _ := configsync.Get(architect, "claude_code_max_runs")
+	if n, ok := v.(int); ok && n > 0 {
+		runs = n
+	}
+
+	return fmt.Sprintf("%dM", 2048+runs*512)
 }
