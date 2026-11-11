@@ -243,13 +243,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 					"Lets ContextMatrix run work on the subscription instead of OpenRouter. Only the token's owner may drive runs. "+
 					"Leave empty to use OpenRouter only.")),
 				huh.NewInput().Title("Claude Code token").EchoMode(huh.EchoModePassword).Value(&a.ClaudeCodeToken).
-					Validate(func(s string) error {
-						if s = strings.TrimSpace(s); s == "" {
-							return nil
-						}
-
-						return engine.CheckClaudeCodeToken(s)
-					}),
+					Validate(claudeCodeTokenInput),
 			))
 		}
 
@@ -347,6 +341,16 @@ func Summary(a engine.Answers) string {
 			"architect model %s\nGitHub          %s\nAA key          %s\nClaude Code     %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
 		a.AuthMode, a.ServerPort, a.AgentPort, a.ChatPort, a.ArchitectPort, mask(a.OpenRouterKey), a.DefaultModel,
 		a.ArchitectModel, a.GitHubMode, mask(a.AAKey), mask(a.ClaudeCodeToken), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
+}
+
+// claudeCodeTokenInput accepts an empty answer, since the screen is optional,
+// and otherwise the token engine.CheckClaudeCodeToken accepts.
+func claudeCodeTokenInput(s string) error {
+	if s = strings.TrimSpace(s); s == "" {
+		return nil
+	}
+
+	return engine.CheckClaudeCodeToken(s)
 }
 
 // note escapes the characters huh renders as markup in a note description

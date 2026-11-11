@@ -717,7 +717,9 @@ func AnswersFrom(t Trees) (Answers, Known) {
 		a.AAKey, k.AAKey = s, true
 	}
 
-	if s := str(t.Server, claudeCodeTokenKey); s != "" {
+	// A carried token the server cannot use is asked for again rather than
+	// failing a migration whose wizard would skip its screen.
+	if s := strings.TrimSpace(str(t.Server, claudeCodeTokenKey)); s != "" && CheckClaudeCodeToken(s) == nil {
 		a.ClaudeCodeToken, k.ClaudeCodeToken = s, true
 	}
 

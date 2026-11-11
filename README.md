@@ -84,8 +84,8 @@ contextmatrix-setup install --yes --auth-mode none --github-mode pat --github-pa
 The Claude Code token has no value flag: `--claude-code-token-file` reads it
 from a file and trims the trailing newline, so the token never shows in `ps` or
 in your shell history. An empty file, or one holding more than the token (a
-space, a second line), is rejected and nothing is written; the wizard checks
-the same.
+space, a second line), is rejected and nothing is written. The wizard rejects
+the same malformed tokens; leaving its answer empty skips the token.
 
 In `multi` login mode the installer opens the one-time link that creates the
 first admin account.

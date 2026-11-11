@@ -6,6 +6,7 @@ import (
 
 	"charm.land/huh/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/mhersson/contextmatrix-setup/internal/engine"
 	"github.com/mhersson/contextmatrix-setup/internal/host"
@@ -61,4 +62,12 @@ func TestSummary_MasksClaudeCodeToken(t *testing.T) {
 	assert.NotContains(t, s, "sk-ant-oat01-secret")
 	assert.Equal(t, strings.Count(Summary(engine.DefaultAnswers()), "****")+1, strings.Count(s, "****"),
 		"the token shows as one more masked value")
+}
+
+func TestClaudeCodeTokenInput(t *testing.T) {
+	assert.NoError(t, claudeCodeTokenInput(""), "the screen is optional")
+	assert.NoError(t, claudeCodeTokenInput("  "), "blank counts as no token")
+	assert.NoError(t, claudeCodeTokenInput(" sk-ant-oat01-abc "))
+	require.Error(t, claudeCodeTokenInput("sk-ant two"))
+	require.Error(t, claudeCodeTokenInput("sk-ant\nsecond"))
 }
