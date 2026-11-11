@@ -242,7 +242,14 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 				huh.NewNote().Title("Claude Code subscription").Description(note("Optional. A Claude Max or Ultra subscription token from `claude setup-token` (valid one year). "+
 					"Lets ContextMatrix run work on the subscription instead of OpenRouter. Only the token's owner may drive runs. "+
 					"Leave empty to use OpenRouter only.")),
-				huh.NewInput().Title("Claude Code token").EchoMode(huh.EchoModePassword).Value(&a.ClaudeCodeToken),
+				huh.NewInput().Title("Claude Code token").EchoMode(huh.EchoModePassword).Value(&a.ClaudeCodeToken).
+					Validate(func(s string) error {
+						if s = strings.TrimSpace(s); s == "" {
+							return nil
+						}
+
+						return engine.CheckClaudeCodeToken(s)
+					}),
 			))
 		}
 

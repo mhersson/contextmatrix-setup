@@ -142,3 +142,30 @@ func TestOverlayChangedFlags_ClaudeCodeToken(t *testing.T) {
 	overlayChangedFlags(untouched.Flags(), &prefill, a)
 	assert.Equal(t, "carried", prefill.ClaudeCodeToken, "a token the flags never gave keeps the carried one")
 }
+
+func TestFlags_ClaudeCodeTokenFileRejectsUnusableContent(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty":           "",
+		"only whitespace": " \n\n",
+		"inner space":     "sk-ant-oat01 abc\n",
+		"several lines":   "Your token:\nsk-ant-oat01-abc\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "token")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+			a := engine.DefaultAnswers()
+
+			var yes, doMigrate, moveRepos bool
+
+			cmd := &cobra.Command{Use: "install"}
+			installFlags(cmd, &a, &yes, &doMigrate, &moveRepos)
+
+			err := cmd.ParseFlags([]string{"--claude-code-token-file", path})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "claude-code-token-file")
+			assert.NotContains(t, err.Error(), "sk-ant-oat01", "the error never echoes the file's content")
+			assert.Empty(t, a.ClaudeCodeToken, "nothing is taken from a rejected file")
+		})
+	}
+}

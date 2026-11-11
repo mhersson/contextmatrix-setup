@@ -98,3 +98,36 @@ func TestKeysAndInstanceID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Regexp(t, `^box-[0-9a-f]{6}$`, id)
 }
+
+func TestNormalize_TrimsClaudeCodeToken(t *testing.T) {
+	a := DefaultAnswers()
+	a.ClaudeCodeToken = "  tok \n"
+	a.Normalize()
+
+	assert.Equal(t, "tok", a.ClaudeCodeToken, "a pasted token keeps no surrounding space")
+}
+
+func TestCheckClaudeCodeToken(t *testing.T) {
+	for _, bad := range []string{"", "tok en", "tok\ten", "tok\nen", "line one\nline two"} {
+		err := CheckClaudeCodeToken(bad)
+		require.Error(t, err, "%q", bad)
+
+		if bad != "" {
+			assert.NotContains(t, err.Error(), bad, "the error never echoes the token")
+		}
+	}
+
+	assert.NoError(t, CheckClaudeCodeToken("sk-ant-oat01-abc_DEF-123"))
+}
+
+func TestValidate_ClaudeCodeToken(t *testing.T) {
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "skip"
+	require.NoError(t, a.Validate(), "no token is a valid answer: the screen is optional")
+
+	a.ClaudeCodeToken = "two words"
+	err := a.Validate()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "two words")
+}

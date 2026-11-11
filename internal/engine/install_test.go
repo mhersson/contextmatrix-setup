@@ -521,3 +521,16 @@ func TestInstall_ClaudeCodeSchemaMissing(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(h.out.String(), "claude_code.oauth_token"), "one warning names the key")
 	assert.NotContains(t, h.out.String(), "sk-ant-oat01-secret")
 }
+
+func TestInstall_RejectsAMalformedClaudeCodeTokenAndWritesNothing(t *testing.T) {
+	h := newHarness(t, true)
+
+	a := tokenAnswers()
+	a.ClaudeCodeToken = "sk-ant-oat01-first\nsk-ant-oat01-second"
+
+	require.Error(t, h.e.Install(context.Background(), a))
+
+	_, err := os.Stat(h.e.L.ServerConfig())
+	assert.True(t, os.IsNotExist(err), "nothing is written for a token the server could not use")
+	assert.NotContains(t, h.out.String(), "sk-ant-oat01-first")
+}

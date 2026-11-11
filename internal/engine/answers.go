@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -102,6 +103,8 @@ func (a *Answers) Normalize() {
 	if a.ArchitectModel == "" {
 		a.ArchitectModel = DefaultArchitectModel
 	}
+
+	a.ClaudeCodeToken = strings.TrimSpace(a.ClaudeCodeToken)
 }
 
 func (a Answers) Validate() error {
@@ -121,6 +124,12 @@ func (a Answers) Validate() error {
 		}
 
 		ports[p] = name
+	}
+
+	if a.ClaudeCodeToken != "" {
+		if err := CheckClaudeCodeToken(a.ClaudeCodeToken); err != nil {
+			return err
+		}
 	}
 
 	switch a.GitHubMode {
@@ -155,4 +164,18 @@ func (a Answers) githubComplete() bool {
 	default:
 		return false
 	}
+}
+
+// CheckClaudeCodeToken accepts what claude setup-token prints: one word with
+// no whitespace. Its errors never echo the value.
+func CheckClaudeCodeToken(tok string) error {
+	if tok == "" {
+		return errors.New("the Claude Code token is empty")
+	}
+
+	if strings.ContainsFunc(tok, unicode.IsSpace) {
+		return errors.New("the Claude Code token must be one line with no spaces: paste only the token claude setup-token prints")
+	}
+
+	return nil
 }

@@ -63,8 +63,13 @@ func (v *tokenFile) Set(path string) error {
 		return err
 	}
 
+	tok := strings.TrimSpace(string(data))
+	if err := engine.CheckClaudeCodeToken(tok); err != nil {
+		return err
+	}
+
 	v.path = path
-	*v.target = strings.TrimSpace(string(data))
+	*v.target = tok
 
 	return nil
 }
