@@ -61,7 +61,7 @@ func Detect(ctx context.Context, r run.Runner, goos string, getenv func(string) 
 
 	info.GoBin = goBin
 	info.Search = ProbeSearchTools(info.ServicePath(), isExecutable, r.LookPath)
-	info.Claude = ProbeClaude(info.ServicePath(), isExecutable, r.LookPath)
+	info.Claude = ProbeClaude(info.ServicePath(), getenv("HOME"), isExecutable, r.LookPath)
 
 	if _, ok := info.Tools["docker"]; ok {
 		res, err := r.Run(ctx, run.Cmd{Name: "docker", Args: []string{"info", "--format", "{{.ServerVersion}}"}})

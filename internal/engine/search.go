@@ -62,14 +62,18 @@ func (e *Engine) hostNotices() []string {
 // no claude binary: blueprints cannot run on the subscription until it is
 // installed. The installer never installs it, and the architect still runs.
 func claudeNotice(info host.Info, tokenSet bool) []string {
-	if !tokenSet || info.Claude.OnServicePath != "" || info.Claude.ShellPath != "" {
+	c := info.Claude
+	if !tokenSet || c.OnServicePath != "" || c.Native != "" {
 		return nil
 	}
 
-	return []string{
-		"!!! claude (Claude Code) is not installed: blueprints cannot run on the Claude Code subscription until it is",
-		"!!! the architect still runs; after installing claude, run contextmatrix-setup update so its unit can find it",
+	lines := []string{"!!! claude (Claude Code) was not found where the architect can run it: blueprints cannot run on the Claude Code subscription until it is"}
+
+	if c.ShellPath != "" {
+		lines = append(lines, "!!! the architect cannot see "+c.ShellPath+": ln -s "+c.ShellPath+" "+info.GoBin+"/claude")
 	}
+
+	return append(lines, "!!! the architect still runs; after adding claude, run contextmatrix-setup update so its unit can find it")
 }
 
 // claudeTokenSet reports whether server.yaml holds a Claude Code token.

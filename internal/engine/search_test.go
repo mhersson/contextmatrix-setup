@@ -79,6 +79,12 @@ func TestClaudeNotice(t *testing.T) {
 	found.Claude = host.ClaudeBinary{OnServicePath: "/usr/local/bin/claude"}
 	assert.Empty(t, claudeNotice(found, true))
 
-	found.Claude = host.ClaudeBinary{ShellPath: "/home/u/.local/bin/claude"}
-	assert.Empty(t, claudeNotice(found, true), "the architect PATH gets the shell-only directory")
+	found.Claude = host.ClaudeBinary{Native: "/home/u/.local/bin/claude"}
+	assert.Empty(t, claudeNotice(found, true), "the architect PATH gets the native installer's directory")
+
+	shellOnly := missing
+	shellOnly.Claude = host.ClaudeBinary{ShellPath: "/home/u/.nvm/bin/claude"}
+	notice := strings.Join(claudeNotice(shellOnly, true), "\n")
+	assert.Contains(t, notice, "/home/u/.nvm/bin/claude", "the hint names the binary the service cannot see")
+	assert.Contains(t, notice, "/g/claude", "and where a link makes it visible")
 }

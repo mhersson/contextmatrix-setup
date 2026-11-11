@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -106,8 +107,9 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 	if _, forced := force[claudeCodeTokenKey]; forced {
 		if _, ok := configsync.Get(schema, claudeCodeTokenKey); !ok {
 			delete(force, claudeCodeTokenKey)
-			e.logf("%s has no %s yet: the Claude Code token was not written; update contextmatrix and run install again to store it",
-				filepath.Base(path), claudeCodeTokenKey)
+			e.logf("%s: this contextmatrix release has no %s, so the Claude Code token was not written; "+
+				"once a release has it, set the key in %s by hand and run contextmatrix-setup update",
+				filepath.Base(path), claudeCodeTokenKey, filepath.Base(path))
 		}
 	}
 
@@ -142,7 +144,24 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 }
 
 func droppedText(d configsync.Dropped) string {
-	return fmt.Sprintf("dropped %s (was %v): key no longer exists upstream", d.Path, d.Value)
+	return fmt.Sprintf("dropped %s (was %s): key no longer exists upstream", d.Path, droppedValue(d.Path, d.Value))
+}
+
+// droppedValue keeps a dropped secret off the terminal and the run log: a
+// mapping shows its key names only, and a token or key shows masked.
+func droppedValue(path string, v any) string {
+	if m, ok := v.(map[string]any); ok {
+		return "{" + strings.Join(slices.Sorted(maps.Keys(m)), ", ") + "}"
+	}
+
+	leaf := strings.ToLower(path[strings.LastIndex(path, ".")+1:])
+	for _, word := range []string{"token", "key", "secret", "password"} {
+		if strings.Contains(leaf, word) {
+			return "****"
+		}
+	}
+
+	return fmt.Sprint(v)
 }
 
 func referenceFor(repo string) string {
@@ -259,10 +278,8 @@ func (e *Engine) serviceFor(repo string, t Trees) services.Service {
 		s.ReadWritePaths = append(s.ReadWritePaths, e.architectPaths(t.Architect)...)
 		s.MemoryMax = architectMemoryMax(t.Architect)
 
-		// The unit PATH is fixed, so a claude only the installer's shell
-		// finds (the native installer's ~/.local/bin) gets its directory.
-		if c := e.Host.Claude; c.OnServicePath == "" && c.ShellPath != "" {
-			env["PATH"] += ":" + filepath.Dir(c.ShellPath)
+		if c := e.Host.Claude; c.OnServicePath == "" && c.Native != "" {
+			env["PATH"] += ":" + filepath.Dir(c.Native)
 		}
 	}
 

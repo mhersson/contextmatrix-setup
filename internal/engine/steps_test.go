@@ -127,7 +127,7 @@ func TestServiceFor_ArchitectClaudePath(t *testing.T) {
 	h := newHarness(t, true)
 	path := h.e.Host.ServicePath()
 
-	h.e.Host.Claude = host.ClaudeBinary{ShellPath: "/home/u/.local/bin/claude"}
+	h.e.Host.Claude = host.ClaudeBinary{Native: "/home/u/.local/bin/claude"}
 	assert.Equal(t, path+":/home/u/.local/bin", h.e.serviceFor(repos.Architect, Trees{}).Env["PATH"])
 
 	for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
@@ -136,6 +136,10 @@ func TestServiceFor_ArchitectClaudePath(t *testing.T) {
 
 	h.e.Host.Claude = host.ClaudeBinary{OnServicePath: "/usr/local/bin/claude"}
 	assert.Equal(t, path, h.e.serviceFor(repos.Architect, Trees{}).Env["PATH"], "a claude on the service PATH needs nothing appended")
+
+	h.e.Host.Claude = host.ClaudeBinary{ShellPath: "/home/u/.nvm/bin/claude"}
+	assert.Equal(t, path, h.e.serviceFor(repos.Architect, Trees{}).Env["PATH"],
+		"the unit text never depends on the shell an update runs from")
 }
 
 func TestArchitectMemoryMax(t *testing.T) {
@@ -170,4 +174,20 @@ func TestRender_ArchitectUnitMemoryAndSandbox(t *testing.T) {
 	for _, repo := range []string{repos.Server, repos.Agent, repos.Chat} {
 		assert.Contains(t, string(services.RenderSystemd(h.e.serviceFor(repo, trees))), "\nMemoryMax=2G\n", repo)
 	}
+}
+
+func TestDroppedTextHidesSecrets(t *testing.T) {
+	block := droppedText(configsync.Dropped{Path: "claude_code", Value: map[string]any{"oauth_token": "sk-ant-oat01-secret", "default_model": "m"}})
+	assert.NotContains(t, block, "sk-ant-oat01-secret", "a schema that drops the block must not print the token")
+	assert.Contains(t, block, "oauth_token", "a dropped mapping names its keys")
+
+	for path, secret := range map[string]string{
+		"github.pat.token":          "ghp_secret",
+		"backends.agent.aa_api_key": "aa-secret",
+		"mcp_api_key":               "mcp-secret",
+	} {
+		assert.NotContains(t, droppedText(configsync.Dropped{Path: path, Value: secret}), secret, path)
+	}
+
+	assert.Contains(t, droppedText(configsync.Dropped{Path: "log_level", Value: "debug"}), "debug", "a plain value still shows")
 }
