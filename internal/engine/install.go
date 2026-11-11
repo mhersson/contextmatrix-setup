@@ -334,6 +334,10 @@ func forcedAnswers(a, prefill Answers, trees Trees) map[string]map[string]any {
 		server("backends.agent.aa_api_key")
 	}
 
+	if a.ClaudeCodeToken != "" && a.ClaudeCodeToken != prefill.ClaudeCodeToken {
+		server(claudeCodeTokenKey)
+	}
+
 	// The server rejects a populated block for the mode not in use, so a
 	// mode switch blanks the other block.
 	switch a.GitHubMode {

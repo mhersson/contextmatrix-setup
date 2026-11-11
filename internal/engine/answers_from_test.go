@@ -137,3 +137,27 @@ func TestAnswersFromReadsTheFirstOfABoardsList(t *testing.T) {
 	assert.Equal(t, "a", a.BoardsName)
 	assert.True(t, known.Boards)
 }
+
+func TestAnswersFrom_ClaudeCodeToken(t *testing.T) {
+	server := parseTree(t, `
+claude_code:
+  oauth_token: tok
+`)
+
+	a, known := AnswersFrom(Trees{Server: server})
+
+	assert.Equal(t, "tok", a.ClaudeCodeToken)
+	assert.True(t, known.ClaudeCodeToken)
+}
+
+func TestAnswersFrom_TreatsAMalformedStoredTokenAsUnknown(t *testing.T) {
+	server := parseTree(t, `
+claude_code:
+  oauth_token: "two words"
+`)
+
+	a, known := AnswersFrom(Trees{Server: server})
+
+	assert.Empty(t, a.ClaudeCodeToken, "a carried token the server cannot use must not block a migration")
+	assert.False(t, known.ClaudeCodeToken, "so the wizard asks for it again")
+}

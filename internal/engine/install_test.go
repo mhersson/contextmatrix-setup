@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -477,4 +478,59 @@ func TestInstallFillsThePlaceholderArchitectBlock(t *testing.T) {
 	assert.Equal(t, true, get(t, server, "backends.architect.enabled"))
 	assert.Len(t, get(t, architect, "api_key"), 64)
 	assert.Equal(t, get(t, architect, "api_key"), get(t, server, "backends.architect.api_key"))
+}
+
+func tokenAnswers() Answers {
+	a := DefaultAnswers()
+	a.AuthMode = "none"
+	a.GitHubMode = "pat"
+	a.GitHubPAT = "x"
+	a.ClaudeCodeToken = "sk-ant-oat01-secret"
+
+	return a
+}
+
+func TestInstall_WritesClaudeCodeToken(t *testing.T) {
+	h := newHarness(t, true)
+
+	require.NoError(t, h.e.Install(context.Background(), tokenAnswers()))
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+	assert.Equal(t, "sk-ant-oat01-secret", get(t, server, "claude_code.oauth_token"))
+	assert.NotContains(t, h.out.String(), "sk-ant-oat01-secret")
+}
+
+func TestInstall_ClaudeCodeSchemaMissing(t *testing.T) {
+	schema, err := configsync.Parse([]byte(fixture(t, "server-defaults.yaml")))
+	require.NoError(t, err)
+	delete(schema, "claude_code")
+
+	old, err := configsync.Encode(schema, referenceFor(repos.Server))
+	require.NoError(t, err)
+
+	h := newHarnessWithServerDefaults(t, true, string(old))
+
+	require.NoError(t, h.e.Install(context.Background(), tokenAnswers()))
+
+	server, _, err := configsync.LoadFile(h.e.L.ServerConfig())
+	require.NoError(t, err)
+
+	_, ok := configsync.Get(server, "claude_code")
+	assert.False(t, ok, "a server release without the block never gets one, or it would refuse to start")
+	assert.Equal(t, 1, strings.Count(h.out.String(), "claude_code.oauth_token"), "one warning names the key")
+	assert.NotContains(t, h.out.String(), "sk-ant-oat01-secret")
+}
+
+func TestInstall_RejectsAMalformedClaudeCodeTokenAndWritesNothing(t *testing.T) {
+	h := newHarness(t, true)
+
+	a := tokenAnswers()
+	a.ClaudeCodeToken = "sk-ant-oat01-first\nsk-ant-oat01-second"
+
+	require.Error(t, h.e.Install(context.Background(), a))
+
+	_, err := os.Stat(h.e.L.ServerConfig())
+	assert.True(t, os.IsNotExist(err), "nothing is written for a token the server could not use")
+	assert.NotContains(t, h.out.String(), "sk-ant-oat01-first")
 }

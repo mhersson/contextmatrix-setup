@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -33,6 +34,7 @@ func installFlags(cmd *cobra.Command, a *engine.Answers, yes, doMigrate, moveRep
 	f.Int64Var(&a.GitHubInstallID, "github-installation-id", 0, "GitHub App installation id")
 	f.StringVar(&a.GitHubKeyFile, "github-key-file", "", "GitHub App private key file")
 	f.StringVar(&a.AAKey, "aa-key", "", "Artificial Analysis API key")
+	f.Var(&tokenFile{target: &a.ClaudeCodeToken}, "claude-code-token-file", "file holding a Claude Code subscription token (claude setup-token)")
 	f.StringVar(&a.TaskSkillsURL, "task-skills-url", "", "task-skills repo URL")
 	f.StringVar(&a.BoardsURL, "boards-url", "", "boards repo URL")
 	f.StringVar(&a.BoardsName, "boards-name", "", "boards directory name (derived from the URL when empty)")
@@ -45,6 +47,34 @@ func installFlags(cmd *cobra.Command, a *engine.Answers, yes, doMigrate, moveRep
 	f.BoolVar(doMigrate, "migrate", false, "with --yes: migrate an existing default-layout install")
 	f.BoolVar(moveRepos, "move-repos", false, "with --migrate: move boards and task-skills checkouts under ~/.contextmatrix")
 }
+
+// tokenFile reads a secret from a file, because a flag value shows in ps
+// and in shell history.
+type tokenFile struct {
+	path   string
+	target *string
+}
+
+func (v *tokenFile) String() string { return v.path }
+
+func (v *tokenFile) Set(path string) error {
+	data, err := os.ReadFile(path) //nolint:gosec // the operator names the file to read.
+	if err != nil {
+		return err
+	}
+
+	tok := strings.TrimSpace(string(data))
+	if err := engine.CheckClaudeCodeToken(tok); err != nil {
+		return err
+	}
+
+	v.path = path
+	*v.target = tok
+
+	return nil
+}
+
+func (*tokenFile) Type() string { return "file" }
 
 // invertBool binds a --no-x flag to a positive field.
 type invertBool struct{ target *bool }
@@ -90,6 +120,7 @@ func overlayChangedFlags(fs *pflag.FlagSet, dst *engine.Answers, src engine.Answ
 	copyIf("github-installation-id", func() { dst.GitHubInstallID = src.GitHubInstallID })
 	copyIf("github-key-file", func() { dst.GitHubKeyFile = src.GitHubKeyFile })
 	copyIf("aa-key", func() { dst.AAKey = src.AAKey })
+	copyIf("claude-code-token-file", func() { dst.ClaudeCodeToken = src.ClaudeCodeToken })
 	copyIf("task-skills-url", func() { dst.TaskSkillsURL = src.TaskSkillsURL })
 	copyIf("boards-url", func() { dst.BoardsURL = src.BoardsURL })
 	copyIf("boards-name", func() { dst.BoardsName = src.BoardsName })

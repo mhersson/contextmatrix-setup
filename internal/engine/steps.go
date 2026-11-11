@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -101,6 +102,17 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 		return configResult{}, err
 	}
 
+	// A forced key bypasses the merge, and a server release without the
+	// claude_code block refuses a config that names it.
+	if _, forced := force[claudeCodeTokenKey]; forced {
+		if _, ok := configsync.Get(schema, claudeCodeTokenKey); !ok {
+			delete(force, claudeCodeTokenKey)
+			e.logf("%s: this contextmatrix release has no %s, so the Claude Code token was not written; "+
+				"once a release has it, set the key in %s by hand and run contextmatrix-setup update",
+				filepath.Base(path), claudeCodeTokenKey, filepath.Base(path))
+		}
+	}
+
 	merged, dropped := configsync.Merge(schema, user, opinionated)
 
 	// An old config may carry boards as a list, which has no single dir to
@@ -132,7 +144,24 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 }
 
 func droppedText(d configsync.Dropped) string {
-	return fmt.Sprintf("dropped %s (was %v): key no longer exists upstream", d.Path, d.Value)
+	return fmt.Sprintf("dropped %s (was %s): key no longer exists upstream", d.Path, droppedValue(d.Path, d.Value))
+}
+
+// droppedValue keeps a dropped secret off the terminal and the run log: a
+// mapping shows its key names only, and a token or key shows masked.
+func droppedValue(path string, v any) string {
+	if m, ok := v.(map[string]any); ok {
+		return "{" + strings.Join(slices.Sorted(maps.Keys(m)), ", ") + "}"
+	}
+
+	leaf := strings.ToLower(path[strings.LastIndex(path, ".")+1:])
+	for _, word := range []string{"token", "key", "secret", "password"} {
+		if strings.Contains(leaf, word) {
+			return "****"
+		}
+	}
+
+	return fmt.Sprint(v)
 }
 
 func referenceFor(repo string) string {
@@ -247,6 +276,11 @@ func (e *Engine) serviceFor(repo string, t Trees) services.Service {
 		s.Description = "ContextMatrix Architect (blueprint backend)"
 		s.Args = []string{"serve", "--config", e.L.ArchitectConfig()}
 		s.ReadWritePaths = append(s.ReadWritePaths, e.architectPaths(t.Architect)...)
+		s.MemoryMax = architectMemoryMax(t.Architect)
+
+		if c := e.Host.Claude; c.OnServicePath == "" && c.Native != "" {
+			env["PATH"] += ":" + filepath.Dir(c.Native)
+		}
 	}
 
 	return s
@@ -415,4 +449,21 @@ func (e *Engine) currentKeys(t Trees) Keys {
 	}
 
 	return k
+}
+
+// defaultArchitectClaudeMaxRuns mirrors the architect's own default for
+// claude_code_max_runs, its cap on concurrent claude processes.
+const defaultArchitectClaudeMaxRuns = 4
+
+// architectMemoryMax sizes the architect unit for its claude processes:
+// 2G for the service plus 512M per concurrent run.
+func architectMemoryMax(architect configsync.Tree) string {
+	runs := defaultArchitectClaudeMaxRuns
+
+	v, _ := configsync.Get(architect, "claude_code_max_runs")
+	if n, ok := v.(int); ok && n > 0 {
+		runs = n
+	}
+
+	return fmt.Sprintf("%dM", 2048+runs*512)
 }

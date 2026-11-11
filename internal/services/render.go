@@ -57,7 +57,12 @@ func RenderSystemd(s Service) []byte {
 	b.WriteString("MemoryDenyWriteExecute=yes\nRestrictRealtime=yes\nRestrictNamespaces=yes\nSystemCallArchitectures=native\n")
 	b.WriteString("SystemCallFilter=@system-service\nSystemCallFilter=~@privileged @resources\n\n")
 
-	b.WriteString("# Resource limits\nMemoryMax=2G\nTasksMax=1024\nLimitNOFILE=65536\n\n")
+	memoryMax := s.MemoryMax
+	if memoryMax == "" {
+		memoryMax = "2G"
+	}
+
+	fmt.Fprintf(&b, "# Resource limits\nMemoryMax=%s\nTasksMax=1024\nLimitNOFILE=65536\n\n", memoryMax)
 	b.WriteString("# Restart with backoff\nRestart=on-failure\nRestartSec=10\nRestartSteps=5\nRestartMaxDelaySec=300\n\n")
 	b.WriteString("[Install]\nWantedBy=default.target\n")
 

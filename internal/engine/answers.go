@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -14,6 +15,8 @@ const (
 	// model the agent and chat share.
 	DefaultArchitectModel = "anthropic/claude-sonnet-5.5"
 )
+
+const claudeCodeTokenKey = "claude_code.oauth_token" //nolint:gosec // a config key name, not a credential.
 
 type Answers struct {
 	AuthMode        string
@@ -30,6 +33,7 @@ type Answers struct {
 	GitHubInstallID int64
 	GitHubKeyFile   string
 	AAKey           string
+	ClaudeCodeToken string
 	TaskSkillsURL   string
 	BoardsURL       string
 	BoardsName      string
@@ -40,14 +44,15 @@ type Answers struct {
 // Known records which answers a config tree actually held. A wizard run
 // after a migration asks only for what the old install never had.
 type Known struct {
-	AuthMode      bool
-	Ports         bool
-	OpenRouterKey bool
-	DefaultModel  bool
-	GitHub        bool
-	AAKey         bool
-	TaskSkills    bool
-	Boards        bool
+	AuthMode        bool
+	Ports           bool
+	OpenRouterKey   bool
+	DefaultModel    bool
+	GitHub          bool
+	AAKey           bool
+	ClaudeCodeToken bool
+	TaskSkills      bool
+	Boards          bool
 }
 
 func DefaultAnswers() Answers {
@@ -98,6 +103,8 @@ func (a *Answers) Normalize() {
 	if a.ArchitectModel == "" {
 		a.ArchitectModel = DefaultArchitectModel
 	}
+
+	a.ClaudeCodeToken = strings.TrimSpace(a.ClaudeCodeToken)
 }
 
 func (a Answers) Validate() error {
@@ -117,6 +124,12 @@ func (a Answers) Validate() error {
 		}
 
 		ports[p] = name
+	}
+
+	if a.ClaudeCodeToken != "" {
+		if err := CheckClaudeCodeToken(a.ClaudeCodeToken); err != nil {
+			return err
+		}
 	}
 
 	switch a.GitHubMode {
@@ -151,4 +164,18 @@ func (a Answers) githubComplete() bool {
 	default:
 		return false
 	}
+}
+
+// CheckClaudeCodeToken accepts what claude setup-token prints: one word with
+// no whitespace. Its errors never echo the value.
+func CheckClaudeCodeToken(tok string) error {
+	if tok == "" {
+		return errors.New("the Claude Code token is empty")
+	}
+
+	if strings.ContainsFunc(tok, unicode.IsSpace) {
+		return errors.New("the Claude Code token must be one line with no spaces: paste only the token claude setup-token prints")
+	}
+
+	return nil
 }

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -91,4 +93,79 @@ func TestRootHasRealCommands(t *testing.T) {
 	update, _, _ := root.Find([]string{"update"})
 	assert.NotNil(t, update.Flags().Lookup("yes"))
 	assert.NotNil(t, update.Flags().Lookup("no-self-update"))
+}
+
+func TestFlags_ClaudeCodeTokenFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(path, []byte("tok\n"), 0o600))
+
+	a := engine.DefaultAnswers()
+
+	var yes, doMigrate, moveRepos bool
+
+	cmd := &cobra.Command{Use: "install"}
+	installFlags(cmd, &a, &yes, &doMigrate, &moveRepos)
+
+	require.NoError(t, cmd.ParseFlags([]string{"--claude-code-token-file", path}))
+	assert.Equal(t, "tok", a.ClaudeCodeToken, "the trailing newline an editor or echo writes is trimmed")
+
+	b := engine.DefaultAnswers()
+	cmd = &cobra.Command{Use: "install"}
+	installFlags(cmd, &b, &yes, &doMigrate, &moveRepos)
+
+	err := cmd.ParseFlags([]string{"--claude-code-token-file", filepath.Join(t.TempDir(), "missing")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "claude-code-token-file")
+}
+
+func TestOverlayChangedFlags_ClaudeCodeToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(path, []byte("new"), 0o600))
+
+	a := engine.DefaultAnswers()
+
+	var yes, doMigrate, moveRepos bool
+
+	cmd := &cobra.Command{Use: "install"}
+	installFlags(cmd, &a, &yes, &doMigrate, &moveRepos)
+	require.NoError(t, cmd.ParseFlags([]string{"--claude-code-token-file", path}))
+
+	prefill := engine.Answers{ClaudeCodeToken: "carried"}
+	overlayChangedFlags(cmd.Flags(), &prefill, a)
+	assert.Equal(t, "new", prefill.ClaudeCodeToken)
+
+	untouched := &cobra.Command{Use: "install"}
+	installFlags(untouched, &a, &yes, &doMigrate, &moveRepos)
+	require.NoError(t, untouched.ParseFlags(nil))
+
+	prefill = engine.Answers{ClaudeCodeToken: "carried"}
+	overlayChangedFlags(untouched.Flags(), &prefill, a)
+	assert.Equal(t, "carried", prefill.ClaudeCodeToken, "a token the flags never gave keeps the carried one")
+}
+
+func TestFlags_ClaudeCodeTokenFileRejectsUnusableContent(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty":           "",
+		"only whitespace": " \n\n",
+		"inner space":     "sk-ant-oat01 abc\n",
+		"several lines":   "Your token:\nsk-ant-oat01-abc\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "token")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+			a := engine.DefaultAnswers()
+
+			var yes, doMigrate, moveRepos bool
+
+			cmd := &cobra.Command{Use: "install"}
+			installFlags(cmd, &a, &yes, &doMigrate, &moveRepos)
+
+			err := cmd.ParseFlags([]string{"--claude-code-token-file", path})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "claude-code-token-file")
+			assert.NotContains(t, err.Error(), "sk-ant-oat01", "the error never echoes the file's content")
+			assert.Empty(t, a.ClaudeCodeToken, "nothing is taken from a rejected file")
+		})
+	}
 }

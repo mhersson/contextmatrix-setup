@@ -69,3 +69,22 @@ func TestNoSearchNoticeWhenTheServiceFindsRG(t *testing.T) {
 	require.NoError(t, h.e.Update(context.Background(), UpdateOptions{Yes: true}))
 	assert.NotContains(t, h.out.String(), missing[0])
 }
+
+func TestClaudeNotice(t *testing.T) {
+	missing := host.Info{OS: "linux", GoBin: "/g"}
+	assert.NotEmpty(t, claudeNotice(missing, true), "a token with no claude to spend it")
+	assert.Empty(t, claudeNotice(missing, false), "without a token the subscription is not in use")
+
+	found := missing
+	found.Claude = host.ClaudeBinary{OnServicePath: "/usr/local/bin/claude"}
+	assert.Empty(t, claudeNotice(found, true))
+
+	found.Claude = host.ClaudeBinary{Native: "/home/u/.local/bin/claude"}
+	assert.Empty(t, claudeNotice(found, true), "the architect PATH gets the native installer's directory")
+
+	shellOnly := missing
+	shellOnly.Claude = host.ClaudeBinary{ShellPath: "/home/u/.nvm/bin/claude"}
+	notice := strings.Join(claudeNotice(shellOnly, true), "\n")
+	assert.Contains(t, notice, "/home/u/.nvm/bin/claude", "the hint names the binary the service cannot see")
+	assert.Contains(t, notice, "/g/claude", "and where a link makes it visible")
+}
