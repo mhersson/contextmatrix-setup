@@ -9,6 +9,10 @@ llm_endpoint:
   base_url: ""
   api_key: ""
 token_costs: {}
+claude_code:
+  oauth_token: ""
+  backends: []
+  default_model: claude-sonnet-5-5
 boards:
   name: boards
   dir: ""

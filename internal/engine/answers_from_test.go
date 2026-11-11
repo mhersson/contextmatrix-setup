@@ -137,3 +137,15 @@ func TestAnswersFromReadsTheFirstOfABoardsList(t *testing.T) {
 	assert.Equal(t, "a", a.BoardsName)
 	assert.True(t, known.Boards)
 }
+
+func TestAnswersFrom_ClaudeCodeToken(t *testing.T) {
+	server := parseTree(t, `
+claude_code:
+  oauth_token: tok
+`)
+
+	a, known := AnswersFrom(Trees{Server: server})
+
+	assert.Equal(t, "tok", a.ClaudeCodeToken)
+	assert.True(t, known.ClaudeCodeToken)
+}

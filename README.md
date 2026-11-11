@@ -35,14 +35,15 @@ The wizard asks for the items below, one screen each. With them at hand the
 first install is a single sitting. Every item also has a flag, see
 [Install](#install).
 
-| Item                                       | Where to get it                                                                                                                                                                                                                                                                       |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OpenRouter API key**                     | <https://openrouter.ai/keys>. Every run and chat goes through OpenRouter. The server passes the key to the agent and chat services, which keep it and give each worker only a per-run proxy token. Leave it empty to add it to `server.yaml` later, but nothing runs until then.      |
-| **Default model**                          | An OpenRouter model slug. The default is `deepseek/deepseek-v4-flash`. The agent and chat use it; chat cannot start without one. The architect has its own default, `anthropic/claude-sonnet-5.5`; `--architect-model` changes it.                                                    |
-| **GitHub credential**                      | A GitHub App or a personal access token, see below. Without one the server does not start.                                                                                                                                                                                            |
-| **Artificial Analysis API key** (optional) | Create an account at <https://artificialanalysis.ai> (free tier) and generate a key on your account page. Gives the model selector live quality scores.                                                                                                                               |
-| **Boards repo URL** (optional)             | The `https://` URL of a GitHub repo the credential above can push to, for example `https://github.com/you/contextmatrix-boards.git`. Create it empty; the server clones it and pushes the first board. Without a URL the boards live in a local repo under `~/.contextmatrix/boards`. |
-| **Task-skills repo URL** (optional)        | The `https://` URL of a repo of task skills the agents read. Without one the agents read an empty local directory.                                                                                                                                                                    |
+| Item                                          | Where to get it                                                                                                                                                                                                                                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **OpenRouter API key**                        | <https://openrouter.ai/keys>. Every run and chat goes through OpenRouter. The server passes the key to the agent and chat services, which keep it and give each worker only a per-run proxy token. Leave it empty to add it to `server.yaml` later, but nothing runs until then.      |
+| **Default model**                             | An OpenRouter model slug. The default is `deepseek/deepseek-v4-flash`. The agent and chat use it; chat cannot start without one. The architect has its own default, `anthropic/claude-sonnet-5.5`; `--architect-model` changes it.                                                    |
+| **GitHub credential**                         | A GitHub App or a personal access token, see below. Without one the server does not start.                                                                                                                                                                                            |
+| **Artificial Analysis API key** (optional)    | Create an account at <https://artificialanalysis.ai> (free tier) and generate a key on your account page. Gives the model selector live quality scores.                                                                                                                               |
+| **Claude Code subscription token** (optional) | Run `claude setup-token` on a machine signed in to your Claude Max or Ultra plan; the token is valid for one year. Lets ContextMatrix run work on the subscription instead of OpenRouter. Only you may drive runs with it. Setup never installs Claude Code itself.                   |
+| **Boards repo URL** (optional)                | The `https://` URL of a GitHub repo the credential above can push to, for example `https://github.com/you/contextmatrix-boards.git`. Create it empty; the server clones it and pushes the first board. Without a URL the boards live in a local repo under `~/.contextmatrix/boards`. |
+| **Task-skills repo URL** (optional)           | The `https://` URL of a repo of task skills the agents read. Without one the agents read an empty local directory.                                                                                                                                                                    |
 
 **GitHub App or PAT?** Pick the App on a personal GitHub account: you create
 and install it yourself, workers receive one-hour tokens scoped to the repos
@@ -77,6 +78,10 @@ without prompts:
 ```bash
 contextmatrix-setup install --yes --auth-mode none --github-mode pat --github-pat "$TOKEN" --openrouter-key "$KEY"
 ```
+
+The Claude Code token has no value flag: `--claude-code-token-file` reads it
+from a file and trims the trailing newline, so the token never shows in `ps` or
+in your shell history.
 
 In `multi` login mode the installer opens the one-time link that creates the
 first admin account.
@@ -223,6 +228,11 @@ in the output. A value that fails the app's validation is reported with the key
 path and that service is not restarted; fix it and rerun. A service held back
 for a missing github block or missing docker is validated once that is fixed,
 since its file lacks those values until then.
+
+The installer writes the Claude Code token to `claude_code.oauth_token` but never
+sets `claude_code.backends`. List a backend there in `server.yaml` once its
+installed release supports Claude Code. Against a contextmatrix release without
+the `claude_code` block, the installer says so and writes no token.
 
 ## Development
 

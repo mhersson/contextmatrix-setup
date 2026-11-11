@@ -64,6 +64,11 @@ func Opinionated(a Answers, f Facts) Trees {
 	configsync.Set(s, "backends.agent.enabled", f.Docker)
 	configsync.Set(s, "backends.agent.default_model", a.DefaultModel)
 	configsync.Set(s, "backends.agent.aa_api_key", a.AAKey)
+
+	if a.ClaudeCodeToken != "" {
+		configsync.Set(s, claudeCodeTokenKey, a.ClaudeCodeToken)
+	}
+
 	configsync.Set(s, "backends.chat.url", fmt.Sprintf("http://localhost:%d", a.ChatPort))
 	configsync.Set(s, "backends.chat.api_key", f.Keys.Chat)
 	configsync.Set(s, "backends.chat.enabled", f.Docker)

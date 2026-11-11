@@ -136,6 +136,14 @@ func fixture(t *testing.T, name string) string {
 func newHarness(t *testing.T, docker bool) *harness {
 	t.Helper()
 
+	return newHarnessWithServerDefaults(t, docker, fixture(t, "server-defaults.yaml"))
+}
+
+// newHarnessWithServerDefaults stubs the server's config defaults with the
+// given schema, for installs against a server release with another key set.
+func newHarnessWithServerDefaults(t *testing.T, docker bool, serverDefaults string) *harness {
+	t.Helper()
+
 	home := t.TempDir()
 	l := layout.New(home, nil)
 	gobin := filepath.Join(home, "go", "bin")
@@ -147,7 +155,7 @@ func newHarness(t *testing.T, docker bool) *harness {
 	f.On("systemctl").Return("", "", 0)
 	f.On("journalctl").Return("", "", 0)
 	f.On("loginctl").Return("", "", 0)
-	f.On(filepath.Join(gobin, "contextmatrix"), "config", "defaults").Return(fixture(t, "server-defaults.yaml"), "", 0)
+	f.On(filepath.Join(gobin, "contextmatrix"), "config", "defaults").Return(serverDefaults, "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix-agent"), "config", "defaults").Return(fixture(t, "agent-defaults.yaml"), "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix-chat"), "config", "defaults").Return(fixture(t, "chat-defaults.yaml"), "", 0)
 	f.On(filepath.Join(gobin, "contextmatrix-architect"), "config", "defaults").Return(fixture(t, "architect-defaults.yaml"), "", 0)

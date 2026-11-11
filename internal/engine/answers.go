@@ -15,6 +15,8 @@ const (
 	DefaultArchitectModel = "anthropic/claude-sonnet-5.5"
 )
 
+const claudeCodeTokenKey = "claude_code.oauth_token" //nolint:gosec // a config key name, not a credential.
+
 type Answers struct {
 	AuthMode        string
 	ServerPort      int
@@ -30,6 +32,7 @@ type Answers struct {
 	GitHubInstallID int64
 	GitHubKeyFile   string
 	AAKey           string
+	ClaudeCodeToken string
 	TaskSkillsURL   string
 	BoardsURL       string
 	BoardsName      string
@@ -40,14 +43,15 @@ type Answers struct {
 // Known records which answers a config tree actually held. A wizard run
 // after a migration asks only for what the old install never had.
 type Known struct {
-	AuthMode      bool
-	Ports         bool
-	OpenRouterKey bool
-	DefaultModel  bool
-	GitHub        bool
-	AAKey         bool
-	TaskSkills    bool
-	Boards        bool
+	AuthMode        bool
+	Ports           bool
+	OpenRouterKey   bool
+	DefaultModel    bool
+	GitHub          bool
+	AAKey           bool
+	ClaudeCodeToken bool
+	TaskSkills      bool
+	Boards          bool
 }
 
 func DefaultAnswers() Answers {

@@ -717,6 +717,10 @@ func AnswersFrom(t Trees) (Answers, Known) {
 		a.AAKey, k.AAKey = s, true
 	}
 
+	if s := str(t.Server, claudeCodeTokenKey); s != "" {
+		a.ClaudeCodeToken, k.ClaudeCodeToken = s, true
+	}
+
 	switch mode := str(t.Server, "github.auth_mode"); mode {
 	case "pat":
 		a.GitHubMode = mode

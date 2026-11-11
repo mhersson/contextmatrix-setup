@@ -79,6 +79,7 @@ const (
 	stepInference  = "inference"
 	stepGitHub     = "github"
 	stepAA         = "aa"
+	stepClaudeCode = "claude-code"
 	stepTaskSkills = "task-skills"
 	stepBoards     = "boards"
 	stepServices   = "services"
@@ -101,6 +102,7 @@ func Steps(known engine.Known, info host.Info) []string {
 	add(stepInference, known.OpenRouterKey && known.DefaultModel)
 	add(stepGitHub, known.GitHub)
 	add(stepAA, known.AAKey)
+	add(stepClaudeCode, known.ClaudeCodeToken)
 	add(stepTaskSkills, known.TaskSkills)
 	add(stepBoards, known.Boards)
 	add(stepServices, info.ServiceManager == "none")
@@ -235,6 +237,15 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 			))
 		}
 
+		if asked[stepClaudeCode] {
+			groups = append(groups, huh.NewGroup(
+				huh.NewNote().Title("Claude Code subscription").Description(note("Optional. A Claude Max or Ultra subscription token from `claude setup-token` (valid one year). "+
+					"Lets ContextMatrix run work on the subscription instead of OpenRouter. Only the token's owner may drive runs. "+
+					"Leave empty to use OpenRouter only.")),
+				huh.NewInput().Title("Claude Code token").EchoMode(huh.EchoModePassword).Value(&a.ClaudeCodeToken),
+			))
+		}
+
 		if asked[stepTaskSkills] {
 			groups = append(groups, huh.NewGroup(
 				huh.NewNote().Title("Task skills").Description("A git repo of task skills the agents read. Leave empty to use a local, empty directory."),
@@ -326,9 +337,9 @@ func Summary(a engine.Answers) string {
 
 	return fmt.Sprintf(
 		"login mode      %s\nports           server %d, agent %d, chat %d, architect %d\nOpenRouter key  %s\ndefault model   %s\n"+
-			"architect model %s\nGitHub          %s\nAA key          %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
+			"architect model %s\nGitHub          %s\nAA key          %s\nClaude Code     %s\ntask skills     %s\nboards          %s (%s)\nservices        %v (linger %v)",
 		a.AuthMode, a.ServerPort, a.AgentPort, a.ChatPort, a.ArchitectPort, mask(a.OpenRouterKey), a.DefaultModel,
-		a.ArchitectModel, a.GitHubMode, mask(a.AAKey), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
+		a.ArchitectModel, a.GitHubMode, mask(a.AAKey), mask(a.ClaudeCodeToken), or(a.TaskSkillsURL, "local only"), or(a.BoardsURL, "local only"), a.BoardsName, a.Services, a.Linger)
 }
 
 // note escapes the characters huh renders as markup in a note description

@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/huh/v2"
@@ -13,14 +14,14 @@ import (
 func TestStepsAskEverythingOnAFreshInstall(t *testing.T) {
 	info := host.Info{OS: "linux", ServiceManager: "systemd"}
 
-	assert.Equal(t, []string{"login", "ports", "inference", "github", "aa", "task-skills", "boards", "services"}, Steps(engine.Known{}, info))
+	assert.Equal(t, []string{"login", "ports", "inference", "github", "aa", "claude-code", "task-skills", "boards", "services"}, Steps(engine.Known{}, info))
 }
 
 func TestStepsSkipWhatTheOldConfigProvided(t *testing.T) {
 	info := host.Info{OS: "linux", ServiceManager: "systemd"}
 	known := engine.Known{AuthMode: true, Ports: true, OpenRouterKey: true, DefaultModel: true, GitHub: true, TaskSkills: true, Boards: true}
 
-	assert.Equal(t, []string{"aa", "services"}, Steps(known, info))
+	assert.Equal(t, []string{"aa", "claude-code", "services"}, Steps(known, info))
 
 	known.DefaultModel = false
 	assert.Contains(t, Steps(known, info), "inference", "inference is asked while the key or the model is missing")
@@ -42,4 +43,22 @@ func TestNoteShowsMarkupCharactersAsWritten(t *testing.T) {
 	view := huh.NewNote().Description(note(text)).View()
 
 	assert.Contains(t, view, text)
+}
+
+func TestSteps_SkipsKnownClaudeCodeToken(t *testing.T) {
+	info := host.Info{OS: "linux", ServiceManager: "systemd"}
+
+	assert.Contains(t, Steps(engine.Known{}, info), "claude-code")
+	assert.NotContains(t, Steps(engine.Known{ClaudeCodeToken: true}, info), "claude-code")
+}
+
+func TestSummary_MasksClaudeCodeToken(t *testing.T) {
+	a := engine.DefaultAnswers()
+	a.ClaudeCodeToken = "sk-ant-oat01-secret"
+
+	s := Summary(a)
+
+	assert.NotContains(t, s, "sk-ant-oat01-secret")
+	assert.Equal(t, strings.Count(Summary(engine.DefaultAnswers()), "****")+1, strings.Count(s, "****"),
+		"the token shows as one more masked value")
 }

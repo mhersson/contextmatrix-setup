@@ -101,6 +101,16 @@ func (e *Engine) writeConfig(ctx context.Context, repo string, opinionated confi
 		return configResult{}, err
 	}
 
+	// A forced key bypasses the merge, and a server release without the
+	// claude_code block refuses a config that names it.
+	if _, forced := force[claudeCodeTokenKey]; forced {
+		if _, ok := configsync.Get(schema, claudeCodeTokenKey); !ok {
+			delete(force, claudeCodeTokenKey)
+			e.logf("%s has no %s yet: the Claude Code token was not written; update contextmatrix and run install again to store it",
+				filepath.Base(path), claudeCodeTokenKey)
+		}
+	}
+
 	merged, dropped := configsync.Merge(schema, user, opinionated)
 
 	// An old config may carry boards as a list, which has no single dir to

@@ -272,3 +272,31 @@ func TestForcedAnswersFollowsEachChangedField(t *testing.T) {
 		assert.Empty(t, keys, repo)
 	}
 }
+
+func TestOpinionated_ClaudeCodeToken(t *testing.T) {
+	a := DefaultAnswers()
+
+	_, ok := configsync.Get(Opinionated(a, testFacts()).Server, "claude_code.oauth_token")
+	assert.False(t, ok, "an empty token leaves the key to the schema default")
+
+	a.ClaudeCodeToken = "tok"
+	assert.Equal(t, "tok", get(t, Opinionated(a, testFacts()).Server, "claude_code.oauth_token"))
+}
+
+func TestInstallForce_ClaudeCodeToken(t *testing.T) {
+	prefill := DefaultAnswers()
+	prefill.ClaudeCodeToken = "old"
+
+	a := prefill
+	a.ClaudeCodeToken = "new"
+
+	server := forcedAnswers(a, prefill, Opinionated(a, testFacts()))[repos.Server]
+	assert.Equal(t, "new", server["claude_code.oauth_token"], "a new token is forced over the carried one")
+
+	server = forcedAnswers(prefill, prefill, Opinionated(prefill, testFacts()))[repos.Server]
+	assert.NotContains(t, server, "claude_code.oauth_token", "an unchanged token is left to the merge")
+
+	a.ClaudeCodeToken = ""
+	server = forcedAnswers(a, prefill, Opinionated(a, testFacts()))[repos.Server]
+	assert.NotContains(t, server, "claude_code.oauth_token", "an empty answer never blanks a carried token")
+}
