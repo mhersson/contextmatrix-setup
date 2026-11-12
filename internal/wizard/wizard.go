@@ -232,7 +232,8 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 
 		if asked[stepAA] {
 			groups = append(groups, huh.NewGroup(
-				huh.NewNote().Title("Artificial Analysis").Description("Optional. Enables live model quality scores for the selector. Free tier at https://artificialanalysis.ai"),
+				huh.NewNote().Title("Artificial Analysis").Description("Optional. Enables live model quality scores for the selector and prices Claude Code subscription usage: "+
+					"without it, subscription costs show $0. Free tier at https://artificialanalysis.ai"),
 				huh.NewInput().Title("Artificial Analysis API key").EchoMode(huh.EchoModePassword).Value(&a.AAKey),
 			))
 		}
@@ -241,6 +242,7 @@ func Run(in engine.Answers, known engine.Known, info host.Info, open func(url st
 			groups = append(groups, huh.NewGroup(
 				huh.NewNote().Title("Claude Code subscription").Description(note("Optional. A Claude Max or Ultra subscription token from `claude setup-token` (valid one year). "+
 					"Lets ContextMatrix run work on the subscription instead of OpenRouter. Only the token's owner may drive runs. "+
+					"Its usage is priced from the Artificial Analysis key; without that key, subscription costs show $0. "+
 					"Leave empty to use OpenRouter only.")),
 				huh.NewInput().Title("Claude Code token").EchoMode(huh.EchoModePassword).Value(&a.ClaudeCodeToken).
 					Validate(claudeCodeTokenInput),
